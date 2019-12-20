@@ -46,10 +46,10 @@ class HwSessionInfo(object):
                  hw_connect_function: Callable[[object], None],
                  hw_disconnect_function: Callable[[], None],
                  app_config: object,
-                 dashd_intf: object):
+                 stashd_intf: object):
         self.__locks = {}  # key: hw_client, value: EnhRLock
         self.__app_config = app_config
-        self.__dashd_intf = dashd_intf
+        self.__stashd_intf = stashd_intf
         self.__get_hw_client_function = get_hw_client_function
         self.__hw_connect_function: Callable = hw_connect_function
         self.__hw_disconnect_function: Callable = hw_disconnect_function
@@ -82,11 +82,11 @@ class HwSessionInfo(object):
         return self.__app_config
 
     @property
-    def dashd_intf(self):
-        return self.__dashd_intf
+    def stashd_intf(self):
+        return self.__stashd_intf
 
-    def set_dashd_intf(self, dashd_intf):
-        self.__dashd_intf = dashd_intf
+    def set_stashd_intf(self, stashd_intf):
+        self.__stashd_intf = stashd_intf
 
     def acquire_client(self):
         cli = self.__get_hw_client_function()

@@ -32,7 +32,7 @@ from cryptography.fernet import Fernet
 
 import app_defs
 import base58
-import dash_utils
+import stash_utils
 import hw_intf
 from app_defs import APP_NAME_SHORT, APP_NAME_LONG, HWType, APP_DATA_DIR_NAME, DEFAULT_LOG_FORMAT, get_known_loggers
 from app_utils import encrypt, decrypt
@@ -66,7 +66,7 @@ class AppFeatueStatus(QObject):
     #  0: default value implemented in the source code
     #  2: value read from the app cache
     #  4: value read from the project github repository (can be lowered or rised)
-    #  6: value read from the Dash network (the highest priority by default)
+    #  6: value read from the Stash network (the highest priority by default)
     PRIORITY_DEFAULT = 0
     PRIORITY_APP_CACHE = 2
     PRIORITY_NETWORK = 6
@@ -106,26 +106,26 @@ class AppConfig(object):
         self.date_format = app_utils.get_default_locale().dateFormat(QLocale.ShortFormat)
         self.date_time_format = app_utils.get_default_locale().dateTimeFormat(QLocale.ShortFormat)
 
-        # List of Dash network configurations. Multiple conn configs advantage is to give the possibility to use
+        # List of Stash network configurations. Multiple conn configs advantage is to give the possibility to use
         # another config if particular one is not functioning (when using "public" RPC service, it could be node's
         # maintanance)
-        self.dash_net_configs = []
+        self.stash_net_configs = []
 
         # to distribute the load evenly over "public" RPC services, we choose radom connection (from enabled ones)
-        # if it is set to False, connections will be used accoording to its order in dash_net_configs list
-        self.random_dash_net_config = True
+        # if it is set to False, connections will be used accoording to its order in stash_net_configs list
+        self.random_stash_net_config = True
 
-        # list of all enabled dashd configurations (DashNetworkConnectionCfg) - they will be used accourding to
+        # list of all enabled stashd configurations (StashNetworkConnectionCfg) - they will be used accourding to
         # the order in list
-        self.active_dash_net_configs = []
+        self.active_stash_net_configs = []
 
-        # list of misbehaving dash network configurations - they will have the lowest priority during next
+        # list of misbehaving stash network configurations - they will have the lowest priority during next
         # connections
         self.defective_net_configs = []
 
         # the contents of the app-params.json configuration file read from the project GitHub repository
         self._remote_app_params = {}
-        self._dash_blockchain_info = {}
+        self._stash_blockchain_info = {}
         self.non_deterministic_mns_status = AppFeatueStatus(True, 0)
         self.deterministic_mns_status = AppFeatueStatus(False, 0)
         self.__dip3_active = None
@@ -136,20 +136,20 @@ class AppConfig(object):
                                               #  NFC: compatible with official Keepkey client app
                                               #  NFKD: compatible with Trezor
 
-        self.dash_network = 'MAINNET'
+        self.stash_network = 'MAINNET'
 
-        self.block_explorer_tx_mainnet = 'https://insight.dash.org/insight/tx/%TXID%'
-        self.block_explorer_addr_mainnet = 'https://insight.dash.org/insight/address/%ADDRESS%'
-        self.block_explorer_tx_testnet = 'https://testnet-insight.dashevo.org/insight/tx/%TXID%'
-        self.block_explorer_addr_testnet = 'https://testnet-insight.dashevo.org/insight/address/%ADDRESS%'
-        self.tx_api_url_mainnet = 'https://insight.dash.org/insight'
-        self.tx_api_url_testnet = 'https://testnet-insight.dashevo.org/insight'
-        self.dash_central_proposal_api = 'https://www.dashcentral.org/api/v1/proposal?hash=%HASH%'
-        self.dash_nexus_proposal_api = 'https://api.dashnexus.org/proposals/%HASH%'
+        self.block_explorer_tx_mainnet = 'https://explorer.stashpay.io/insight-api/tx/%TXID%'
+        self.block_explorer_addr_mainnet = 'https://explorer.stashpay.io/insight-api/address/%ADDRESS%'
+        self.block_explorer_tx_testnet = 'https://testnet-insight.stashevo.org/insight/tx/%TXID%'
+        self.block_explorer_addr_testnet = 'https://testnet-insight.stashevo.org/insight/address/%ADDRESS%'
+        self.tx_api_url_mainnet = 'https://explorer.stashpay.io/insight-api'
+        self.tx_api_url_testnet = 'https://testnet-insight.stashevo.org/insight'
+        self.stash_central_proposal_api = 'https://www.stashcentral.org/api/v1/proposal?hash=%HASH%'
+        self.stash_nexus_proposal_api = 'https://api.stashnexus.org/proposals/%HASH%'
 
         # public RPC connection configurations
-        self.public_conns_mainnet: Dict[str, DashNetworkConnectionCfg] = {}
-        self.public_conns_testnet: Dict[str, DashNetworkConnectionCfg] = {}
+        self.public_conns_mainnet: Dict[str, StashNetworkConnectionCfg] = {}
+        self.public_conns_testnet: Dict[str, StashNetworkConnectionCfg] = {}
 
         self.check_for_updates = True
         self.backup_config_file = True
@@ -231,7 +231,7 @@ class AppConfig(object):
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
 
-        cache_file_name = os.path.join(self.cache_dir, 'dmt_cache_v2.json')
+        cache_file_name = os.path.join(self.cache_dir, 'smt_cache_v2.json')
         app_cache.init(cache_file_name, self.app_version)
         self.app_last_version = app_cache.get_value('app_version', '', str)
         self.app_config_file_name = ''
@@ -253,7 +253,7 @@ class AppConfig(object):
 
         # setup logging
         self.log_dir = os.path.join(app_user_dir, 'logs')
-        self.log_file = os.path.join(self.log_dir, 'dmt.log')
+        self.log_file = os.path.join(self.log_dir, 'smt.log')
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
@@ -285,29 +285,29 @@ class AppConfig(object):
 
     def save_cache_settings(self):
         if self.non_deterministic_mns_status.get_value() is not None:
-            app_cache.set_value('NON_DETERMINISTIC_MNS_' + self.dash_network,
+            app_cache.set_value('NON_DETERMINISTIC_MNS_' + self.stash_network,
                                 self.non_deterministic_mns_status.get_value())
         if self.deterministic_mns_status.get_value() is not None:
-            app_cache.set_value('DETERMINISTIC_MNS_' + self.dash_network, self.deterministic_mns_status.get_value())
+            app_cache.set_value('DETERMINISTIC_MNS_' + self.stash_network, self.deterministic_mns_status.get_value())
 
     def restore_cache_settings(self):
-        ena = app_cache.get_value('NON_DETERMINISTIC_MNS_' + self.dash_network, True, bool)
+        ena = app_cache.get_value('NON_DETERMINISTIC_MNS_' + self.stash_network, True, bool)
         self.non_deterministic_mns_status.set_value(ena, AppFeatueStatus.PRIORITY_APP_CACHE)
 
-        ena = app_cache.get_value('DETERMINISTIC_MNS_' + self.dash_network, False, bool)
+        ena = app_cache.get_value('DETERMINISTIC_MNS_' + self.stash_network, False, bool)
         self.deterministic_mns_status.set_value(ena, AppFeatueStatus.PRIORITY_APP_CACHE)
 
     def copy_from(self, src_config):
-        self.dash_network = src_config.dash_network
-        self.dash_net_configs = copy.deepcopy(src_config.dash_net_configs)
-        self.random_dash_net_config = src_config.random_dash_net_config
+        self.stash_network = src_config.stash_network
+        self.stash_net_configs = copy.deepcopy(src_config.stash_net_configs)
+        self.random_stash_net_config = src_config.random_stash_net_config
         self.hw_type = src_config.hw_type
         self.hw_keepkey_psw_encoding = src_config.hw_keepkey_psw_encoding
         self.block_explorer_tx_mainnet = src_config.block_explorer_tx_mainnet
         self.block_explorer_tx_testnet = src_config.block_explorer_tx_testnet
         self.block_explorer_addr_mainnet = src_config.block_explorer_addr_mainnet
         self.block_explorer_addr_testnet = src_config.block_explorer_addr_testnet
-        self.dash_central_proposal_api = src_config.dash_central_proposal_api
+        self.stash_central_proposal_api = src_config.stash_central_proposal_api
         self.check_for_updates = src_config.check_for_updates
         self.backup_config_file = src_config.backup_config_file
         self.read_proposals_external_attributes = src_config.read_proposals_external_attributes
@@ -327,17 +327,17 @@ class AppConfig(object):
 
     def configure_cache(self):
         if self.is_testnet():
-            db_cache_file_name = 'dmt_cache_testnet_v2.db'
+            db_cache_file_name = 'smt_cache_testnet_v2.db'
         else:
-            db_cache_file_name = 'dmt_cache_v2.db'
+            db_cache_file_name = 'smt_cache_v2.db'
         self.tx_cache_dir = os.path.join(self.cache_dir, 'tx-' + self.hw_coin_name)
         if not os.path.exists(self.tx_cache_dir):
             os.makedirs(self.tx_cache_dir)
             if self.is_testnet():
                 # move testnet json files to a subdir (don't do this for mainnet files
-                # util there most of users move to dmt v0.9.22
+                # util there most of users move to smt v0.9.22
                 try:
-                    for file in glob.glob(os.path.join(self.cache_dir, 'insight_dash_testnet*.json')):
+                    for file in glob.glob(os.path.join(self.cache_dir, 'insight_stash_testnet*.json')):
                         shutil.move(file, self.tx_cache_dir)
                 except Exception as e:
                     logging.exception(str(e))
@@ -361,8 +361,8 @@ class AppConfig(object):
         from a file.
         :return:
         """
-        self.dash_net_configs.clear()
-        self.active_dash_net_configs.clear()
+        self.stash_net_configs.clear()
+        self.active_stash_net_configs.clear()
         self.defective_net_configs.clear()
         self.masternodes.clear()
 
@@ -459,11 +459,11 @@ class AppConfig(object):
                 if self.log_level_str != log_level_str:
                     self.set_log_level(log_level_str)
 
-                dash_network = config.get(section, 'dash_network', fallback='MAINNET')
-                if dash_network not in ('MAINNET', 'TESTNET'):
-                    logging.warning(f'Invalid dash_network value: {dash_network}')
-                    dash_network = 'MAINNET'
-                self.dash_network = dash_network
+                stash_network = config.get(section, 'stash_network', fallback='MAINNET')
+                if stash_network not in ('MAINNET', 'TESTNET'):
+                    logging.warning(f'Invalid stash_network value: {stash_network}')
+                    stash_network = 'MAINNET'
+                self.stash_network = stash_network
 
                 if self.is_mainnet():
                     def_bip32_path = "44'/5'/0'/0/0"
@@ -484,7 +484,7 @@ class AppConfig(object):
                                     self.hw_keepkey_psw_encoding)
                     self.hw_keepkey_psw_encoding = 'NFC'
 
-                self.random_dash_net_config = self.value_to_bool(config.get(section, 'random_dash_net_config',
+                self.random_stash_net_config = self.value_to_bool(config.get(section, 'random_stash_net_config',
                                                                             fallback='1'))
                 self.check_for_updates = self.value_to_bool(config.get(section, 'check_for_updates', fallback='1'))
                 self.backup_config_file = self.value_to_bool(config.get(section, 'backup_config_file', fallback='1'))
@@ -518,7 +518,7 @@ class AppConfig(object):
                                 mn.port = config.get(section, 'port', fallback='')
                                 mn.privateKey = self.simple_decrypt(
                                     config.get(section, 'private_key', fallback='').strip(), ini_version < 4,
-                                    lambda x: dash_utils.validate_wif_privkey(x, self.dash_network) )
+                                    lambda x: stash_utils.validate_wif_privkey(x, self.stash_network) )
                                 mn.collateralBip32Path = config.get(section, 'collateral_bip32_path', fallback='').strip()
                                 mn.collateralAddress = config.get(section, 'collateral_address', fallback='').strip()
                                 mn.collateralTx = config.get(section, 'collateral_tx', fallback='').strip()
@@ -579,7 +579,7 @@ class AppConfig(object):
                                 was_error = True
                         elif re.match(conn_cfg_section_name+'\d', section):
                             # read network configuration from new config file format
-                            cfg = DashNetworkConnectionCfg('rpc')
+                            cfg = StashNetworkConnectionCfg('rpc')
                             cfg.enabled = self.value_to_bool(config.get(section, 'enabled', fallback='1'))
                             cfg.host = config.get(section, 'host', fallback='').strip()
                             cfg.port = config.get(section, 'port', fallback='').strip()
@@ -594,19 +594,19 @@ class AppConfig(object):
                             cfg.testnet = self.value_to_bool(config.get(section, 'testnet', fallback='0'))
                             skip_adding = False
                             if correct_public_nodes:
-                                if cfg.host.lower() == 'alice.dash-dmt.eu':
-                                    cfg.host = 'alice.dash-masternode-tool.org'
+                                if cfg.host.lower() == 'alice.stash-smt.eu':
+                                    cfg.host = 'alice.stash-masternode-tool.org'
                                     cfg.port = '443'
                                     configuration_corrected = True
-                                elif cfg.host.lower() == 'luna.dash-dmt.eu':
-                                    cfg.host = 'luna.dash-masternode-tool.org'
+                                elif cfg.host.lower() == 'luna.stash-smt.eu':
+                                    cfg.host = 'luna.stash-masternode-tool.org'
                                     cfg.port = '443'
                                     configuration_corrected = True
-                                elif cfg.host.lower() == 'test.stats.dash.org':
+                                elif cfg.host.lower() == 'test.stats.stashpay.io':
                                     skip_adding = True
                                     configuration_corrected = True
                             if not skip_adding:
-                                self.dash_net_configs.append(cfg)
+                                self.stash_net_configs.append(cfg)
 
                     except Exception as e:
                         logging.exception(str(e))
@@ -662,7 +662,7 @@ class AppConfig(object):
             # else: file will be created while saving
 
         try:
-            cfgs = self.decode_connections(default_config.dashd_default_connections)
+            cfgs = self.decode_connections(default_config.stashd_default_connections)
             if cfgs:
                 # force import default connecticons if there is no any in the configuration
                 force_import = (self.app_last_version == '0.9.15')
@@ -728,13 +728,13 @@ class AppConfig(object):
         config.add_section(section)
         config.set(section, 'CFG_VERSION', str(CURRENT_CFG_FILE_VERSION))
         config.set(section, 'log_level', self.log_level_str)
-        config.set(section, 'dash_network', self.dash_network)
+        config.set(section, 'stash_network', self.stash_network)
         if not self.hw_type:
             self.hw_type = HWType.trezor
         config.set(section, 'hw_type', self.hw_type)
         config.set(section, 'hw_keepkey_psw_encoding', self.hw_keepkey_psw_encoding)
         config.set(section, 'bip32_base_path', self.last_bip32_base_path)
-        config.set(section, 'random_dash_net_config', '1' if self.random_dash_net_config else '0')
+        config.set(section, 'random_stash_net_config', '1' if self.random_stash_net_config else '0')
         config.set(section, 'check_for_updates', '1' if self.check_for_updates else '0')
         config.set(section, 'backup_config_file', '1' if self.backup_config_file else '0')
         config.set(section, 'dont_use_file_dialogs', '1' if self.dont_use_file_dialogs else '0')
@@ -774,8 +774,8 @@ class AppConfig(object):
             config.set(section, 'dmn_voting_address', mn.dmn_voting_address)
             mn.modified = False
 
-        # save dash network connections
-        for idx, cfg in enumerate(self.dash_net_configs):
+        # save stash network connections
+        for idx, cfg in enumerate(self.stash_net_configs):
             section = 'CONNECTION' + str(idx+1)
             config.add_section(section)
             config.set(section, 'method', cfg.method)
@@ -839,7 +839,7 @@ class AppConfig(object):
             if features:
                 feature = features.get(symbol)
                 if feature:
-                    a = feature.get(self.dash_network.lower())
+                    a = feature.get(self.stash_network.lower())
                     if a:
                         prio = a.get('priority', 0)
                         status = a.get('status')
@@ -851,14 +851,14 @@ class AppConfig(object):
             self.non_deterministic_mns_status.set_value(*get_feature_config_remote('NON_DETERMINISTIC_MNS'))
             self.deterministic_mns_status.set_value(*get_feature_config_remote('DETERMINISTIC_MNS'))
 
-    def read_dash_network_app_params(self, dashd_intf):
-        """ Read parameters having impact on the app's behavior (sporks/dips) from the Dash network. Called
+    def read_stash_network_app_params(self, stashd_intf):
+        """ Read parameters having impact on the app's behavior (sporks/dips) from the Stash network. Called
         after connecting to the network. """
 
         if self.__dip3_active is None:
             try:
-                self._dash_blockchain_info = dashd_intf.getblockchaininfo()
-                bip9 = self._dash_blockchain_info.get("bip9_softforks")
+                self._stash_blockchain_info = stashd_intf.getblockchaininfo()
+                bip9 = self._stash_blockchain_info.get("bip9_softforks")
                 if bip9:
                     dip3 = bip9.get('dip0003')
                     if dip3:
@@ -873,9 +873,9 @@ class AppConfig(object):
 
         if self.__spork15_active is None:
             try:
-                spork_block = dashd_intf.get_spork_value('SPORK_15_DETERMINISTIC_MNS_ENABLED')
+                spork_block = stashd_intf.get_spork_value('SPORK_15_DETERMINISTIC_MNS_ENABLED')
                 if isinstance(spork_block, int):
-                    height = dashd_intf.getblockcount()
+                    height = stashd_intf.getblockcount()
                     self.__spork15_active = (height >= spork_block)
                 else:
                     self.__spork15_active = False
@@ -889,25 +889,25 @@ class AppConfig(object):
     def is_deterministic_mns_enabled(self):
         return self.deterministic_mns_status.get_value() is True
 
-    def is_dip3_active(self, dashd_intf):
+    def is_dip3_active(self, stashd_intf):
         if self.__dip3_active is None:
-            self.read_dash_network_app_params(dashd_intf)
+            self.read_stash_network_app_params(stashd_intf)
         return self.__dip3_active is True
 
-    def is_spork_15_active(self, dashd_intf):
+    def is_spork_15_active(self, stashd_intf):
         if self.__spork15_active is None:
-            self.read_dash_network_app_params(dashd_intf)
+            self.read_stash_network_app_params(stashd_intf)
         return self.__spork15_active is True
 
     def get_default_protocol(self) -> int:
         prot = None
         if self._remote_app_params:
-            dp = self._remote_app_params.get('defaultDashdProtocol')
+            dp = self._remote_app_params.get('defaultStashdProtocol')
             if dp:
-                prot = dp.get(self.dash_network.lower())
+                prot = dp.get(self.stash_network.lower())
         return prot
 
-    def get_spork_state_from_config(self, spork_nr: int, dash_network: str, default_state: bool):
+    def get_spork_state_from_config(self, spork_nr: int, stash_network: str, default_state: bool):
         state = default_state
         if self._remote_app_params:
             sporks = self._remote_app_params.get('sporks')
@@ -916,7 +916,7 @@ class AppConfig(object):
                     name = spork.get('name', '')
                     active = spork.get('active')
                     if name.find('SPORK_' + str(spork_nr) + '_') == 0:
-                        state = active.get(dash_network.lower(), state)
+                        state = active.get(stash_network.lower(), state)
         return state
 
     def value_to_bool(self, value, default=None):
@@ -990,7 +990,7 @@ class AppConfig(object):
                 if isinstance(l, logging.Logger):
                     l.setLevel(level)
         else:
-            # setting-up log level of external (non-dmt) loggers to avoid cluttering the log file
+            # setting-up log level of external (non-smt) loggers to avoid cluttering the log file
             for lname in get_known_loggers():
                 if lname.external:
                     l = logging.getLogger(lname.name)
@@ -1003,38 +1003,38 @@ class AppConfig(object):
             self.log_handler.setFormatter(formatter)
 
     def is_config_complete(self):
-        for cfg in self.dash_net_configs:
+        for cfg in self.stash_net_configs:
             if cfg.enabled:
                 return True
         return False
 
     def prepare_conn_list(self):
         """
-        Prepare list of enabled connections for connecting to dash network. 
-        :return: list of DashNetworkConnectionCfg objects order randomly (random_dash_net_config == True) or according 
+        Prepare list of enabled connections for connecting to stash network. 
+        :return: list of StashNetworkConnectionCfg objects order randomly (random_stash_net_config == True) or according 
             to order in configuration
         """
         tmp_list = []
-        for cfg in self.dash_net_configs:
+        for cfg in self.stash_net_configs:
             if cfg.enabled and self.is_testnet() == cfg.testnet:
                 tmp_list.append(cfg)
-        if self.random_dash_net_config:
+        if self.random_stash_net_config:
             ordered_list = []
             while len(tmp_list):
                 idx = randint(0, len(tmp_list)-1)
                 ordered_list.append(tmp_list[idx])
                 del tmp_list[idx]
-            self.active_dash_net_configs = ordered_list
+            self.active_stash_net_configs = ordered_list
         else:
-            self.active_dash_net_configs = tmp_list
+            self.active_stash_net_configs = tmp_list
 
     def get_ordered_conn_list(self):
-        if not self.active_dash_net_configs:
+        if not self.active_stash_net_configs:
             self.prepare_conn_list()
-        return self.active_dash_net_configs
+        return self.active_stash_net_configs
 
     def conn_config_changed(self):
-        self.active_dash_net_configs = []
+        self.active_stash_net_configs = []
         self.defective_net_configs = []
 
     def conn_cfg_failure(self, cfg):
@@ -1048,7 +1048,7 @@ class AppConfig(object):
 
     def decode_connections(self, raw_conn_list):
         """
-        Decodes list of dicts describing connection to a list of DashNetworkConnectionCfg objects.
+        Decodes list of dicts describing connection to a list of StashNetworkConnectionCfg objects.
         :param raw_conn_list: 
         :return: list of connection objects
         """
@@ -1057,7 +1057,7 @@ class AppConfig(object):
             try:
                 if 'use_ssh_tunnel' in conn_raw and 'host' in conn_raw and 'port' in conn_raw and \
                    'username' in conn_raw and 'password' in conn_raw and 'use_ssl' in conn_raw:
-                    cfg = DashNetworkConnectionCfg('rpc')
+                    cfg = StashNetworkConnectionCfg('rpc')
                     cfg.use_ssh_tunnel = conn_raw['use_ssh_tunnel']
                     cfg.host = conn_raw['host']
                     cfg.port = conn_raw['port']
@@ -1094,7 +1094,7 @@ class AppConfig(object):
                 'ssh_user': str non-mandatory
             },
         ]
-        :return: list of DashNetworkConnectionCfg objects or None if there was an error while importing
+        :return: list of StashNetworkConnectionCfg objects or None if there was an error while importing
         """
         try:
             conns_json = conns_json.strip()
@@ -1132,7 +1132,7 @@ class AppConfig(object):
         Imports connections from a list. Used at the app's start to process default connections and/or from
           a configuration dialog, when user pastes from a clipboard a string, describing connections he 
           wants to add to the configuration. The latter feature is used for a convenience.
-        :param in_conns: list of DashNetworkConnectionCfg objects.
+        :param in_conns: list of StashNetworkConnectionCfg objects.
         :returns: tuple (list_of_added_connections, list_of_updated_connections)
         """
 
@@ -1143,15 +1143,15 @@ class AppConfig(object):
             # the same for testnet
             mainnet_conn_count = 0
             testnet_conn_count = 0
-            for conn in self.dash_net_configs:
+            for conn in self.stash_net_configs:
                 if conn.testnet:
                     testnet_conn_count += 1
                 else:
                     mainnet_conn_count += 1
 
             for nc in in_conns:
-                if (self.dash_network == 'MAINNET' and nc.testnet == False) or \
-                   (self.dash_network == 'TESTNET' and nc.testnet == True) or not limit_to_network:
+                if (self.stash_network == 'MAINNET' and nc.testnet == False) or \
+                   (self.stash_network == 'TESTNET' and nc.testnet == True) or not limit_to_network:
                     id = nc.get_conn_id()
                     # check if new connection is in existing list
                     conn = self.get_conn_cfg_by_id(id)
@@ -1160,7 +1160,7 @@ class AppConfig(object):
                                                                    False, bool) or \
                            (testnet_conn_count == 0 and nc.testnet) or  (mainnet_conn_count == 0 and nc.mainnet):
                             # this new connection was not automatically imported before
-                            self.dash_net_configs.append(nc)
+                            self.stash_net_configs.append(nc)
                             added_conns.append(nc)
                             app_cache.set_value('imported_default_conn_' + nc.get_conn_id(), True)
                     elif not conn.identical(nc) and force_import:
@@ -1170,11 +1170,11 @@ class AppConfig(object):
 
     def get_conn_cfg_by_id(self, id):
         """
-        Returns DashNetworkConnectionCfg object by its identifier or None if does not exists.
+        Returns StashNetworkConnectionCfg object by its identifier or None if does not exists.
         :param id: Identifier of the sought connection.
-        :return: DashNetworkConnectionCfg object or None if does not exists.
+        :return: StashNetworkConnectionCfg object or None if does not exists.
         """
-        for conn in self.dash_net_configs:
+        for conn in self.stash_net_configs:
             if conn.get_conn_id() == id:
                 return conn
         return None
@@ -1213,32 +1213,32 @@ class AppConfig(object):
         return modified
 
     def is_testnet(self) -> bool:
-        return self.dash_network == 'TESTNET'
+        return self.stash_network == 'TESTNET'
 
     def is_mainnet(self) -> bool:
-        return self.dash_network == 'MAINNET'
+        return self.stash_network == 'MAINNET'
 
     @property
     def hw_coin_name(self):
         if self.is_testnet():
-            return 'Dash Testnet'
+            return 'Stash Testnet'
         else:
-            return 'Dash'
+            return 'Stash'
 
     def get_block_explorer_tx(self):
-        if self.dash_network == 'MAINNET':
+        if self.stash_network == 'MAINNET':
             return self.block_explorer_tx_mainnet
         else:
             return self.block_explorer_tx_testnet
 
     def get_block_explorer_addr(self):
-        if self.dash_network == 'MAINNET':
+        if self.stash_network == 'MAINNET':
             return self.block_explorer_addr_mainnet
         else:
             return self.block_explorer_addr_testnet
 
     def get_tx_api_url(self):
-        if self.dash_network == 'MAINNET':
+        if self.stash_network == 'MAINNET':
             return self.tx_api_url_mainnet
         else:
             return self.tx_api_url_testnet
@@ -1291,7 +1291,7 @@ class AppConfig(object):
     def get_app_img_dir(self):
         return os.path.join(self.app_dir, '', 'img')
 
-    def is_connection_public(self, conn: 'DashNetworkConnectionCfg'):
+    def is_connection_public(self, conn: 'StashNetworkConnectionCfg'):
         conns = self.public_conns_mainnet if self.is_mainnet() else self.public_conns_testnet
         if conn.get_conn_id() in conns:
             return True
@@ -1570,16 +1570,16 @@ class MasternodeConfig:
             raise Exception('Invalid voting key type')
         self.__dmn_voting_key_type = type
 
-    def get_current_key_for_voting(self, app_config: AppConfig, dashd_intf):
-        if app_config.is_spork_15_active(dashd_intf) and self.is_deterministic:
+    def get_current_key_for_voting(self, app_config: AppConfig, stashd_intf):
+        if app_config.is_spork_15_active(stashd_intf) and self.is_deterministic:
             return self.dmn_voting_private_key
         else:
             return self.privateKey
 
-    def get_dmn_owner_public_address(self, dash_network) -> Optional[str]:
+    def get_dmn_owner_public_address(self, stash_network) -> Optional[str]:
         if self.__dmn_owner_key_type == InputKeyType.PRIVATE:
             if self.__dmn_owner_private_key:
-                address = dash_utils.wif_privkey_to_address(self.__dmn_owner_private_key, dash_network)
+                address = stash_utils.wif_privkey_to_address(self.__dmn_owner_private_key, stash_network)
                 return address
         else:
             if self.__dmn_owner_address:
@@ -1589,21 +1589,21 @@ class MasternodeConfig:
     def get_dmn_owner_pubkey_hash(self) -> Optional[str]:
         if self.dmn_owner_key_type == InputKeyType.PRIVATE:
             if self.__dmn_owner_private_key:
-                pubkey = dash_utils.wif_privkey_to_pubkey(self.__dmn_owner_private_key)
+                pubkey = stash_utils.wif_privkey_to_pubkey(self.__dmn_owner_private_key)
                 pubkey_bin = bytes.fromhex(pubkey)
                 pub_hash = bitcoin.bin_hash160(pubkey_bin)
                 return pub_hash.hex()
         else:
             if self.__dmn_owner_address:
-                ret = dash_utils.address_to_pubkey_hash(self.__dmn_owner_address)
+                ret = stash_utils.address_to_pubkey_hash(self.__dmn_owner_address)
                 if ret:
                     return ret.hex()
         return ''
 
-    def get_dmn_voting_public_address(self, dash_network) -> Optional[str]:
+    def get_dmn_voting_public_address(self, stash_network) -> Optional[str]:
         if self.__dmn_voting_key_type == InputKeyType.PRIVATE:
             if self.__dmn_voting_private_key:
-                address = dash_utils.wif_privkey_to_address(self.__dmn_voting_private_key, dash_network)
+                address = stash_utils.wif_privkey_to_address(self.__dmn_voting_private_key, stash_network)
                 return address
         else:
             if self.__dmn_voting_address:
@@ -1613,13 +1613,13 @@ class MasternodeConfig:
     def get_dmn_voting_pubkey_hash(self) -> Optional[str]:
         if self.__dmn_voting_key_type == InputKeyType.PRIVATE:
             if self.__dmn_voting_private_key:
-                pubkey = dash_utils.wif_privkey_to_pubkey(self.__dmn_voting_private_key)
+                pubkey = stash_utils.wif_privkey_to_pubkey(self.__dmn_voting_private_key)
                 pubkey_bin = bytes.fromhex(pubkey)
                 pub_hash = bitcoin.bin_hash160(pubkey_bin)
                 return pub_hash.hex()
         else:
             if self.__dmn_voting_address:
-                ret = dash_utils.address_to_pubkey_hash(self.__dmn_voting_address)
+                ret = stash_utils.address_to_pubkey_hash(self.__dmn_voting_address)
                 if ret:
                     return ret.hex()
         return ''
@@ -1627,7 +1627,7 @@ class MasternodeConfig:
     def get_dmn_operator_pubkey(self) -> Optional[str]:
         if self.__dmn_operator_key_type == InputKeyType.PRIVATE:
             if self.__dmn_operator_private_key:
-                pubkey = dash_utils.bls_privkey_to_pubkey(self.__dmn_operator_private_key)
+                pubkey = stash_utils.bls_privkey_to_pubkey(self.__dmn_operator_private_key)
                 return pubkey
         else:
             return self.__dmn_operator_public_key
@@ -1674,7 +1674,7 @@ class SSHConnectionCfg(object):
         self.__password = password
 
 
-class DashNetworkConnectionCfg(object):
+class StashNetworkConnectionCfg(object):
     def __init__(self, method):
         self.__enabled = True
         self.method = method    # now only 'rpc'
@@ -1713,7 +1713,7 @@ class DashNetworkConnectionCfg(object):
     def identical(self, cfg2):
         """
         Checks if connection object passed as an argument has exactly the same values as self object.
-        :param cfg2: DashNetworkConnectionCfg object to compare
+        :param cfg2: StashNetworkConnectionCfg object to compare
         :return: True, if objects have identical attributes.
         """
         return self.host == cfg2.host and self.port == cfg2.port and self.username == cfg2.username and \
@@ -1744,7 +1744,7 @@ class DashNetworkConnectionCfg(object):
     def is_http_proxy(self):
         """
         Returns if current config is a http proxy. Method is not very brilliant for now: we assume, that 
-        proxy uses SSL while normal, "local" dashd does not. 
+        proxy uses SSL while normal, "local" stashd does not. 
         """
         if self.__use_ssl:
             return True

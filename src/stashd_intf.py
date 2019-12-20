@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import QMessageBox
 from psw_cache import SshPassCache
 from common import AttrsProtected, CancelException
 
-log = logging.getLogger('dmt.dashd_intf')
+log = logging.getLogger('smt.stashd_intf')
 
 
 try:
@@ -148,13 +148,13 @@ class UnknownError(Exception):
     pass
 
 
-class DashdConnectionError(Exception):
+class StashdConnectionError(Exception):
     def __init__(self, org_exception):
         Exception.__init__(org_exception)
         self.org_exception = org_exception
 
 
-class DashdSSH(object):
+class StashdSSH(object):
     def __init__(self, host, port, username, on_connection_broken_callback=None):
         self.host = host
         self.port = port
@@ -274,23 +274,23 @@ class DashdSSH(object):
         else:
             raise Exception('SSH not connected')
 
-    def find_dashd_config(self):
+    def find_stashd_config(self):
         """
-        Try to read configuration of remote dash daemon. In particular we need parameters concering rpc
+        Try to read configuration of remote stash daemon. In particular we need parameters concering rpc
         configuration.
-        :return: tuple (dashd_running, dashd_config_found, dashd config file contents as dict)
+        :return: tuple (stashd_running, stashd_config_found, stashd config file contents as dict)
                 or error string in error occured
         """
-        dashd_running = False
-        dashd_config_found = False
+        stashd_running = False
+        stashd_config_found = False
         if not self.ssh:
             raise Exception('SSH session not ready')
         try:
-            # find dashd process id if running
+            # find stashd process id if running
             try:
-                pids = self.remote_command('ps -C "dashd" -o pid')
+                pids = self.remote_command('ps -C "stashd" -o pid')
             except UnknownError:
-                raise Exception('is dashd running on the remote machine?')
+                raise Exception('is stashd running on the remote machine?')
             pid = None
             if isinstance(pids, list):
                 pids = [pid.strip() for pid in pids]
@@ -300,41 +300,41 @@ class DashdSSH(object):
                 pid = pids[1]
             config = {}
             if pid:
-                dashd_running = True
-                # using dashd pid find its executable path and then .dashcore directory and finally dash.conf file
+                stashd_running = True
+                # using stashd pid find its executable path and then .stashcore directory and finally stash.conf file
                 executables = self.remote_command('ls -l /proc/' + str(pid) + '/exe')
                 if executables and len(executables) >= 1:
                     elems = executables[0].split('->')
                     if len(elems) == 2:
                         executable = elems[1].strip()
-                        dashd_dir = os.path.dirname(executable)
-                        dash_conf_file = dashd_dir + '/.dashcore/dash.conf'
+                        stashd_dir = os.path.dirname(executable)
+                        stash_conf_file = stashd_dir + '/.stashcore/stash.conf'
                         conf_lines = []
                         try:
-                            conf_lines = self.remote_command('cat ' + dash_conf_file)
+                            conf_lines = self.remote_command('cat ' + stash_conf_file)
                         except Exception as e:
                             # probably error no such file or directory
-                            # try to read dashd's cwd + cmdline
+                            # try to read stashd's cwd + cmdline
                             cwd_lines = self.remote_command('ls -l /proc/' + str(pid) + '/cwd')
                             if cwd_lines:
                                 elems = cwd_lines[0].split('->')
                                 if len(elems) >= 2:
                                     cwd = elems[1]
-                                    dash_conf_file = cwd + '/.dashcore/dash.conf'
+                                    stash_conf_file = cwd + '/.stashcore/stash.conf'
                                     try:
-                                        conf_lines = self.remote_command('cat ' + dash_conf_file)
+                                        conf_lines = self.remote_command('cat ' + stash_conf_file)
                                     except Exception as e:
                                         # second method did not suceed, so assume, that conf file is located
-                                        # i /home/<username>/.dashcore directory
-                                        dash_conf_file = '/home/' + self.username + '/.dashcore/dash.conf'
-                                        conf_lines = self.remote_command('cat ' + dash_conf_file)
+                                        # i /home/<username>/.stashcore directory
+                                        stash_conf_file = '/home/' + self.username + '/.stashcore/stash.conf'
+                                        conf_lines = self.remote_command('cat ' + stash_conf_file)
 
                         for line in conf_lines:
                             elems = [e.strip() for e in line.split('=')]
                             if len(elems) == 2:
                                 config[elems[0]] = elems[1]
-                        dashd_config_found = True
-            return dashd_running, dashd_config_found, config
+                        stashd_config_found = True
+            return stashd_running, stashd_config_found, config
         except Exception as e:
             return str(e)
 
@@ -348,26 +348,26 @@ class DashdSSH(object):
             self.connected = False
 
 
-class DashdIndexException(JSONRPCException):
+class StashdIndexException(JSONRPCException):
     """
-    Exception for notifying, that dash daemon should have indexing option tuned on
+    Exception for notifying, that stash daemon should have indexing option tuned on
     """
     def __init__(self, parent_exception):
         JSONRPCException.__init__(self, parent_exception.error)
         self.message = self.message + \
-                       '\n\nMake sure the dash daemon you are connecting to has the following options enabled in ' \
-                       'its dash.conf:\n\n' + \
+                       '\n\nMake sure the stash daemon you are connecting to has the following options enabled in ' \
+                       'its stash.conf:\n\n' + \
                        'addressindex=1\n' + \
                        'spentindex=1\n' + \
                        'timestampindex=1\n' + \
                        'txindex=1\n\n' + \
-                       'Changing these parameters requires to execute dashd with "-reindex" option (linux: ./dashd -reindex)'
+                       'Changing these parameters requires to execute stashd with "-reindex" option (linux: ./stashd -reindex)'
 
 
 def control_rpc_call(func):
     """
     Decorator function for catching HTTPConnection timeout and then resetting the connection.
-    :param func: DashdInterface's method decorated
+    :param func: StashdInterface's method decorated
     """
     def catch_timeout_wrapper(*args, **kwargs):
         ret = None
@@ -395,7 +395,7 @@ def control_rpc_call(func):
                             BrokenPipeError) as e:
                         log.warning('Error while calling of "' + str(func) + ' (1)". Details: ' + str(e))
                         if last_conn_reset_time:
-                            raise DashdConnectionError(e)  # switch to another config if possible
+                            raise StashdConnectionError(e)  # switch to another config if possible
                         else:
                             last_exception = e
                             self.reset_connection()  # rettry with the same connection
@@ -403,11 +403,11 @@ def control_rpc_call(func):
                     except JSONRPCException as e:
                         log.error('Error while calling of "' + str(func) + ' (2)". Details: ' + str(e))
                         if e.code == -5 and e.message == 'No information available for address':
-                            raise DashdIndexException(e)
+                            raise StashdIndexException(e)
                         elif e.error.get('message','').find('403 Forbidden') >= 0 or \
                              e.error.get('message', '').find('502 Bad Gateway') >= 0:
                             self.http_conn.close()
-                            raise DashdConnectionError(e)
+                            raise StashdConnectionError(e)
                         elif e.code in (-32603,):
                             # for these error codes don't retry the request with another rpc connetion
                             #  -32603: failure to verify vote
@@ -417,12 +417,12 @@ def control_rpc_call(func):
 
                     except (socket.gaierror, ConnectionRefusedError, TimeoutError, socket.timeout,
                             NoValidConnectionsError) as e:
-                        # exceptions raised most likely by not functioning dashd node; try to switch to another node
+                        # exceptions raised most likely by not functioning stashd node; try to switch to another node
                         # if there is any in the config
                         log.warning('Error while calling of "' + str(func) + ' (3)". Details: ' + str(e))
-                        raise DashdConnectionError(e)
+                        raise StashdConnectionError(e)
 
-                except DashdConnectionError as e:
+                except StashdConnectionError as e:
                     # try another net config if possible
                     log.error('Error while calling of "' + str(func) + '" (4). Details: ' + str(e))
                     if not self.switch_to_next_config():
@@ -479,7 +479,7 @@ def json_cache_wrapper(func, intf, cache_file_ident, skip_cache=False,
     def json_call_wrapper(*args, **kwargs):
         nonlocal skip_cache, cache_file_ident, intf, func
 
-        fname = '/insight_dash_'
+        fname = '/insight_stash_'
         if intf.app_config.is_testnet():
             fname += 'testnet_'
 
@@ -509,7 +509,7 @@ def json_cache_wrapper(func, intf, cache_file_ident, skip_cache=False,
     return json_call_wrapper
 
 
-class DashdInterface(WndUtils):
+class StashdInterface(WndUtils):
     def __init__(self, window,
                  on_connection_initiated_callback=None,
                  on_connection_failed_callback=None,
@@ -590,7 +590,7 @@ class DashdInterface(WndUtils):
             db_correction_duration = 0.0
             log.debug("Reading masternodes' data from DB")
             cur.execute("SELECT id, ident, status, protocol, payee, last_seen, active_seconds,"
-                        " last_paid_time, last_paid_block, IP from MASTERNODES where dmt_active=1")
+                        " last_paid_time, last_paid_block, IP from MASTERNODES where smt_active=1")
             for row in cur.fetchall():
                 db_id = row[0]
                 ident = row[1]
@@ -664,7 +664,7 @@ class DashdInterface(WndUtils):
 
     def switch_to_next_config(self):
         """
-        If there is another dashd config not used recently, switch to it. Called only when there was a problem
+        If there is another stashd config not used recently, switch to it. Called only when there was a problem
         with current connection config.
         :return: True if successfully switched or False if there was no another config
         """
@@ -704,13 +704,13 @@ class DashdInterface(WndUtils):
 
     def open(self):
         """
-        Opens connection to dash RPC. If it fails, then the next enabled conn config will be used, if any exists.
+        Opens connection to stash RPC. If it fails, then the next enabled conn config will be used, if any exists.
         :return: True if successfully connected, False if user cancelled the operation. If all of the attempts 
             fail, then appropriate exception will be raised.
         """
         try:
             if not self.cur_conn_def:
-                raise Exception('There is no connections to Dash network enabled in the configuration.')
+                raise Exception('There is no connections to Stash network enabled in the configuration.')
 
             while True:
                 try:
@@ -723,7 +723,7 @@ class DashdInterface(WndUtils):
                     return False
                 except (socket.gaierror, ConnectionRefusedError, TimeoutError, socket.timeout,
                         NoValidConnectionsError) as e:
-                    # exceptions raised by not likely functioning dashd node; try to switch to another node
+                    # exceptions raised by not likely functioning stashd node; try to switch to another node
                     # if there is any in the config
                     if not self.switch_to_next_config():
                         raise e  # couldn't use another conn config, raise exception
@@ -750,7 +750,7 @@ class DashdInterface(WndUtils):
 
     def open_internal(self):
         """
-        Try to establish connection to dash RPC daemon for current connection config.
+        Try to establish connection to stash RPC daemon for current connection config.
         :return: True, if connection successfully establishes, False if user Cancels the operation (not always 
             cancelling will be possible - only when user is prompted for a password).
         """
@@ -766,7 +766,7 @@ class DashdInterface(WndUtils):
             if self.cur_conn_def.use_ssh_tunnel:
                 # RPC over SSH
                 if self.ssh is None:
-                    self.ssh = DashdSSH(self.cur_conn_def.ssh_conn_cfg.host, self.cur_conn_def.ssh_conn_cfg.port,
+                    self.ssh = StashdSSH(self.cur_conn_def.ssh_conn_cfg.host, self.cur_conn_def.ssh_conn_cfg.port,
                                         self.cur_conn_def.ssh_conn_cfg.username)
                 try:
                     log.debug('starting ssh.connect')
@@ -879,10 +879,10 @@ class DashdInterface(WndUtils):
             if verify_node:
                 node_under_testnet = info.get('testnet')
                 if self.config.is_testnet() and not node_under_testnet:
-                    raise Exception('This RPC node works under Dash MAINNET, but your current configuration is '
+                    raise Exception('This RPC node works under Stash MAINNET, but your current configuration is '
                                     'for TESTNET.')
                 elif self.config.is_mainnet() and node_under_testnet:
-                    raise Exception('This RPC node works under Dash TESTNET, but your current configuration is '
+                    raise Exception('This RPC node works under Stash TESTNET, but your current configuration is '
                                     'for MAINNET.')
             return info
         else:
@@ -891,7 +891,7 @@ class DashdInterface(WndUtils):
     @control_rpc_call
     def issynchronized(self):
         if self.open():
-            # if connecting to HTTP(S) proxy do not check if dash daemon is synchronized
+            # if connecting to HTTP(S) proxy do not check if stash daemon is synchronized
             if self.cur_conn_def.is_http_proxy():
                 return True
             else:
@@ -957,7 +957,7 @@ class DashdInterface(WndUtils):
     @control_rpc_call
     def get_masternodelist(self, *args, data_max_age=MASTERNODES_CACHE_VALID_SECONDS) -> List[Masternode]:
         """
-        Returns masternode list, read from the Dash network or from the internal cache.
+        Returns masternode list, read from the Stash network or from the internal cache.
         :param args: arguments passed to the 'masternodelist' RPC call
         :param data_max_age: maximum age (in seconds) of the cached masternode data to used; if the
             cache is older than 'data_max_age', then an RPC call is performed to load newer masternode data;
@@ -1019,7 +1019,7 @@ class DashdInterface(WndUtils):
         if self.open():
 
             if len(args) == 1 and args[0] == 'full':
-                last_read_time = app_cache.get_value(f'MasternodesLastReadTime_{self.app_config.dash_network}', 0, int)
+                last_read_time = app_cache.get_value(f'MasternodesLastReadTime_{self.app_config.stash_network}', 0, int)
                 log.info("MasternodesLastReadTime: %d" % last_read_time)
 
                 if self.masternodes and data_max_age > 0 and \
@@ -1027,7 +1027,7 @@ class DashdInterface(WndUtils):
                     log.info('Using cached masternodelist (data age: %s)' % str(int(time.time()) - last_read_time))
                     return self.masternodes
                 else:
-                    log.info('Loading masternode list from Dash daemon...')
+                    log.info('Loading masternode list from Stash daemon...')
                     mns = self.proxy.masternodelist(*args)
                     mns = parse_mns(mns)
                     log.info('Finished loading masternode list')
@@ -1054,8 +1054,8 @@ class DashdInterface(WndUtils):
 
                                 if self.db_intf.db_active:
                                     cur.execute("INSERT INTO MASTERNODES(ident, status, protocol, payee, last_seen,"
-                                            " active_seconds, last_paid_time, last_paid_block, ip, dmt_active,"
-                                            " dmt_create_time) "
+                                            " active_seconds, last_paid_time, last_paid_block, ip, smt_active,"
+                                            " smt_create_time) "
                                             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                                             (mn.ident, mn.status, mn.protocol, mn.payee, mn.lastseen,
                                              mn.activeseconds, mn.lastpaidtime, mn.lastpaidblock, mn.ip, 1,
@@ -1073,7 +1073,7 @@ class DashdInterface(WndUtils):
 
                             if not mn.marker:
                                 if self.db_intf.db_active:
-                                    cur.execute("UPDATE MASTERNODES set dmt_active=0, dmt_deactivation_time=?"
+                                    cur.execute("UPDATE MASTERNODES set smt_active=0, smt_deactivation_time=?"
                                                 "WHERE ID=?",
                                                 (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                                 mn.db_id))
@@ -1081,7 +1081,7 @@ class DashdInterface(WndUtils):
                                 self.masternodes_by_ident.pop(mn.ident,0)
                                 del self.masternodes[mn_index]
 
-                        app_cache.set_value(f'MasternodesLastReadTime_{self.app_config.dash_network}', int(time.time()))
+                        app_cache.set_value(f'MasternodesLastReadTime_{self.app_config.stash_network}', int(time.time()))
                         self.update_mn_queue_values()
                     finally:
                         if db_modified:

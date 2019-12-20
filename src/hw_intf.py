@@ -11,9 +11,9 @@ import sys
 
 from PyQt5 import QtWidgets
 
-import dash_utils
+import stash_utils
 from common import CancelException
-from dash_utils import bip32_path_n_to_string
+from stash_utils import bip32_path_n_to_string
 from hw_common import HardwareWalletPinException, HwSessionInfo, get_hw_type
 import logging
 from app_defs import HWType
@@ -169,8 +169,8 @@ def connect_hw(hw_session: Optional[HwSessionInfo], hw_type: HWType, device_id: 
             pk = get_public_node_fun(path_n).node.public_key
             return pk
 
-        path = dash_utils.get_default_bip32_base_path(hw_session.app_config.dash_network)
-        path_n = dash_utils.bip32_path_string_to_n(path)
+        path = stash_utils.get_default_bip32_base_path(hw_session.app_config.stash_network)
+        path_n = stash_utils.bip32_path_string_to_n(path)
 
         # show message for Trezor T device while waiting for the user to choose the passphrase input method
         pub = WndUtils.run_thread_dialog(call_get_public_node, (get_public_node_fun, path_n),
@@ -232,7 +232,7 @@ def connect_hw(hw_session: Optional[HwSessionInfo], hw_type: HWType, device_id: 
         cli = ledger.connect_ledgernano()
         if cli and hw_session:
             try:
-                path = dash_utils.get_default_bip32_base_path(hw_session.app_config.dash_network)
+                path = stash_utils.get_default_bip32_base_path(hw_session.app_config.stash_network)
                 ap = ledger.get_address_and_pubkey(cli, path)
                 hw_session.set_base_info(path, ap['publicKey'])
             except CancelException:
@@ -299,7 +299,7 @@ def sign_tx(hw_session: HwSessionInfo, utxos_to_spend: List[UtxoType],
     Creates a signed transaction.
     :param main_ui: Main window for configuration data
     :param utxos_to_spend: list of utxos to send
-    :param tx_outputs: destination addresses. Fields: 0: dest Dash address. 1: the output value in satoshis,
+    :param tx_outputs: destination addresses. Fields: 0: dest Stash address. 1: the output value in satoshis,
         2: the bip32 path of the address if the output is the change address or None otherwise
     :param tx_fee: transaction fee
     :param rawtransactions: dict mapping txid to rawtransaction
@@ -439,7 +439,7 @@ def get_address(hw_session: HwSessionInfo, bip32_path: str, show_display: bool =
 
                 try:
                     if isinstance(bip32_path, str):
-                        bip32_path = dash_utils.bip32_path_string_to_n(bip32_path)
+                        bip32_path = stash_utils.bip32_path_string_to_n(bip32_path)
                     ret = btc.get_address(client, hw_session.app_config.hw_coin_name, bip32_path, show_display)
                     return ret
                 except (CancelException, exceptions.Cancelled):
@@ -451,7 +451,7 @@ def get_address(hw_session: HwSessionInfo, bip32_path: str, show_display: bool =
 
                 try:
                     if isinstance(bip32_path, str):
-                        bip32_path = dash_utils.bip32_path_string_to_n(bip32_path)
+                        bip32_path = stash_utils.bip32_path_string_to_n(bip32_path)
                     return client.get_address(hw_session.app_config.hw_coin_name, bip32_path, show_display)
                 except CallException as e:
                     if isinstance(e.args, tuple) and len(e.args) >= 2 and isinstance(e.args[1], str) and \
@@ -497,7 +497,7 @@ def get_address_and_pubkey(hw_session: HwSessionInfo, bip32_path):
 
             from trezorlib import btc
             if isinstance(bip32_path, str):
-                bip32_path = dash_utils.bip32_path_string_to_n(bip32_path)
+                bip32_path = stash_utils.bip32_path_string_to_n(bip32_path)
             return {
                 'address': btc.get_address(client, hw_session.app_config.hw_coin_name, bip32_path, False),
                 'publicKey': btc.get_public_node(client, bip32_path).node.public_key
@@ -505,7 +505,7 @@ def get_address_and_pubkey(hw_session: HwSessionInfo, bip32_path):
 
         elif hw_session.app_config.hw_type == HWType.keepkey:
             if isinstance(bip32_path, str):
-                bip32_path = dash_utils.bip32_path_string_to_n(bip32_path)
+                bip32_path = stash_utils.bip32_path_string_to_n(bip32_path)
             return {
                 'address': client.get_address(hw_session.app_config.hw_coin_name, bip32_path, False),
                 'publicKey': client.get_public_node(bip32_path).node.public_key
@@ -536,13 +536,13 @@ def get_xpub(hw_session: HwSessionInfo, bip32_path):
         if hw_session.app_config.hw_type == HWType.trezor:
             from trezorlib import btc
             if isinstance(bip32_path, str):
-                bip32_path = dash_utils.bip32_path_string_to_n(bip32_path)
+                bip32_path = stash_utils.bip32_path_string_to_n(bip32_path)
 
             return btc.get_public_node(client, bip32_path).xpub
 
         elif hw_session.app_config.hw_type == HWType.keepkey:
             if isinstance(bip32_path, str):
-                bip32_path = dash_utils.bip32_path_string_to_n(bip32_path)
+                bip32_path = stash_utils.bip32_path_string_to_n(bip32_path)
 
             return client.get_public_node(bip32_path).xpub
 

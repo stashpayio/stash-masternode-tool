@@ -557,7 +557,7 @@
     <string>Check Network Connection</string>
    </property>
    <property name="toolTip">
-    <string>Check Dash Network Connection</string>
+    <string>Check Stash Network Connection</string>
    </property>
   </action>
   <action name="action_open_settings_window">
@@ -609,7 +609,7 @@
   </action>
   <action name="action_about_app">
    <property name="text">
-    <string>About DashMasternodeTool...</string>
+    <string>About StashMasternodeTool...</string>
    </property>
    <property name="menuRole">
     <enum>QAction::AboutRole</enum>

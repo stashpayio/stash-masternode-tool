@@ -19,7 +19,7 @@ from bitcoinrpc.authproxy import JSONRPCException
 import app_cache
 import app_utils
 from app_config import AppConfig
-from dashd_intf import DashdInterface
+from stashd_intf import StashdInterface
 from ui.ui_transaction_dlg import Ui_TransactionDlg
 from wallet_common import UtxoType, TxOutputType
 from wnd_utils import WndUtils
@@ -28,13 +28,13 @@ from wnd_utils import WndUtils
 CACHE_ITEM_DETAILS_WORD_WRAP = 'TransactionDlg_DetailsWordWrap'
 
 
-log = logging.getLogger('dmt.transaction_dlg')
+log = logging.getLogger('smt.transaction_dlg')
 
 
 class TransactionDlg(QDialog, Ui_TransactionDlg, WndUtils):
     def __init__(self, parent: QDialog,
                  config: AppConfig,
-                 dashd_intf: DashdInterface,
+                 stashd_intf: StashdInterface,
                  raw_transaction: str,
                  use_instant_send: bool,
                  tx_inputs: List[UtxoType],
@@ -48,7 +48,7 @@ class TransactionDlg(QDialog, Ui_TransactionDlg, WndUtils):
         WndUtils.__init__(self, config)
         self.config = config
         self.parent = parent
-        self.dashd_intf = dashd_intf
+        self.stashd_intf = stashd_intf
         self.transaction_sent = False
         self.raw_transaction = raw_transaction
         self.use_instant_send = use_instant_send
@@ -112,7 +112,7 @@ class TransactionDlg(QDialog, Ui_TransactionDlg, WndUtils):
             self.edt_recipients.clear()
             if not self.decoded_transaction:
                 try:
-                    self.decoded_transaction = self.dashd_intf.decoderawtransaction(self.raw_transaction)
+                    self.decoded_transaction = self.stashd_intf.decoderawtransaction(self.raw_transaction)
                     self.decoded_transaction['hex'] = self.raw_transaction
 
                     # fill up the missing fields for this new (not yet unpublished) transaction which will
@@ -162,7 +162,7 @@ class TransactionDlg(QDialog, Ui_TransactionDlg, WndUtils):
                                 rawtx = self.dependent_transactions.get(txid)
 
                             if not rawtx:
-                                rawtx = self.dashd_intf.getrawtransaction(txid, 1)
+                                rawtx = self.stashd_intf.getrawtransaction(txid, 1)
 
                             if rawtx:
                                 vlist = rawtx.get('vout')
@@ -207,9 +207,9 @@ class TransactionDlg(QDialog, Ui_TransactionDlg, WndUtils):
                                         address_info = f' (yours)'
 
                             if row_idx == 0:
-                                recipients = f'<tr><td class="lbl"><p class="lbl">Recipients:</p></td><td>{address} {address_info}</td><td><p class="val">{app_utils.to_string(val)} Dash</p></td><td></td></tr>'
+                                recipients = f'<tr><td class="lbl"><p class="lbl">Recipients:</p></td><td>{address} {address_info}</td><td><p class="val">{app_utils.to_string(val)} Stash</p></td><td></td></tr>'
                             else:
-                                recipients += f'<tr><td></td><td>{address} {address_info}</td><td><p class="val">{app_utils.to_string(val)} Dash</p></td><td></td></tr>'
+                                recipients += f'<tr><td></td><td>{address} {address_info}</td><td><p class="val">{app_utils.to_string(val)} Stash</p></td><td></td></tr>'
 
                         fee = round(inputs_total - outputs_total, 8)
 
@@ -244,8 +244,8 @@ td.lbl{{text-align: right;vertical-align: top}} p.lbl{{margin: 0 5px 0 0; font-w
 <p style=" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;">
  <table>
     {send_tx_row}
-    <tr><td class="lbl"><p class="lbl">Total amount:</p></td><td>{app_utils.to_string(inputs_total)} Dash</td><td></td></tr>
-    <tr><td class="lbl"><p class="lbl">Fee:</p></td><td>{app_utils.to_string(fee)} Dash</td><td></td></tr>
+    <tr><td class="lbl"><p class="lbl">Total amount:</p></td><td>{app_utils.to_string(inputs_total)} Stash</td><td></td></tr>
+    <tr><td class="lbl"><p class="lbl">Fee:</p></td><td>{app_utils.to_string(fee)} Stash</td><td></td></tr>
     <tr><td class="lbl"><p class="lbl">Transaction size:</p></td><td>{tx_size_str}</td><td></td></tr>
     <tr><td class="lbl"><p class="lbl">InstantSend:</p></td><td>{'YES' if self.use_instant_send else 'NO'}</td><td></td></tr>
     {recipients}
@@ -272,7 +272,7 @@ td.lbl{{text-align: right;vertical-align: top}} p.lbl{{margin: 0 5px 0 0; font-w
     def on_btn_broadcast_clicked(self):
         try:
             log.debug('Broadcasting raw transaction: ' + self.raw_transaction)
-            txid = self.dashd_intf.sendrawtransaction(self.raw_transaction, self.use_instant_send)
+            txid = self.stashd_intf.sendrawtransaction(self.raw_transaction, self.use_instant_send)
             if txid != self.tx_id:
                 log.warning('TXID returned by sendrawtransaction differs from the original txid')
                 self.tx_id = txid
