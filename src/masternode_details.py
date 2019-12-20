@@ -1054,14 +1054,14 @@ class WdgMasternodeDetails(QWidget, ui_masternode_details.Ui_WdgMasternodeDetail
                     apply_utxo(utxo)
         else:
             if utxos is not None:
-                WndUtils.warnMsg('Couldn\'t find any 1000 Stash UTXO in your wallet.')
+                WndUtils.warnMsg('Couldn\'t find any 10000 Stash UTXO in your wallet.')
 
     def get_collateral_tx_address_thread(self, ctrl: CtrlObject, bip44_wallet: Bip44Wallet,
                                          check_break_scanning_ext: Callable[[], bool]):
         utxos = []
         break_scanning = False
         txes_cnt = 0
-        msg = 'Scanning wallet transactions for 1000 Stash UTXOs.<br>' \
+        msg = 'Scanning wallet transactions for 10000 Stash UTXOs.<br>' \
               'This may take a while (<a href="break">break</a>)....'
         ctrl.dlg_config_fun(dlg_title="Scanning wallet", show_progress_bar=False)
         ctrl.display_msg_fun(msg)

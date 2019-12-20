@@ -1302,7 +1302,7 @@ class MainWindow(QMainWindow, WndUtils, ui_main_dlg.Ui_MainWindow):
                         default_button=QMessageBox.Cancel, icon=QMessageBox.Warning) == QMessageBox.Cancel:
                     return
 
-            # check if there is 1000 Stash collateral
+            # check if there is 10000 Stash collateral
             msg_verification_problem = 'You can continue without verification step if you are sure, that ' \
                                        'TX hash/index are correct.'
             try:
@@ -1315,9 +1315,9 @@ class MainWindow(QMainWindow, WndUtils, ui_main_dlg.Ui_MainWindow):
                         found = True
                         break
                 if found:
-                    if utxo.get('satoshis', None) != 100000000000:
+                    if utxo.get('satoshis', None) != 1000000000000:
                         if self.queryDlg(
-                                message="Collateral transaction output should equal 100000000000 Satoshis (1000 Stash)"
+                                message="Collateral transaction output should equal 1000000000000 Satoshis (10000 Stash)"
                                         ", but its value is: %d Satoshis.\n\nDo you really want to continue?"
                                         % (utxo['satoshis']),
                                 buttons=QMessageBox.Yes | QMessageBox.Cancel,

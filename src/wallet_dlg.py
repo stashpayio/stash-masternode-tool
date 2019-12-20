@@ -568,7 +568,7 @@ class WalletDlg(QDialog, ui_wallet_dlg.Ui_WalletDlg, WndUtils):
                     log.info(f'UTXO satosis: {utxo.satoshis}')
                     if utxo.is_collateral:
                         if self.queryDlg(
-                                "Warning: you are going to transfer masternode's collateral (1000 Stash) transaction "
+                                "Warning: you are going to transfer masternode's collateral (10000 Stash) transaction "
                                 "output. Proceeding will result in broken masternode.\n\n"
                                 "Do you really want to continue?",
                                 buttons=QMessageBox.Yes | QMessageBox.Cancel,
