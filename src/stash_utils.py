@@ -44,7 +44,7 @@ class ChainParamsMainNet(ChainParams):
     PREFIX_PUBKEY_ADDRESS = 76
     PREFIX_SCRIPT_ADDRESS = 16
     PREFIX_SECRET_KEY = 204
-    BIP44_COIN_TYPE = 5
+    BIP44_COIN_TYPE = 49344
 
 
 class ChainParamsTestNet(ChainParams):

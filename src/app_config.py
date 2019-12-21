@@ -466,7 +466,7 @@ class AppConfig(object):
                 self.stash_network = stash_network
 
                 if self.is_mainnet():
-                    def_bip32_path = "44'/5'/0'/0/0"
+                    def_bip32_path = "44'/49344'/0'/0/0"
                 else:
                     def_bip32_path = "44'/1'/0'/0/0"
                 self.last_bip32_base_path = config.get(section, 'bip32_base_path', fallback=def_bip32_path)
