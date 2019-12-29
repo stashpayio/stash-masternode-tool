@@ -608,7 +608,7 @@ class SendFundsDestination(QtWidgets.QWidget, WndUtils):
             fee_multiplier = 1
 
         if self.inputs_total_amount > 0.0:
-            bytes = (self.inputs_count * 148) + (recipients_count * 34) + 10
+            bytes = (self.inputs_count * 148) + (recipients_count * 34) + 11
             fee = round(bytes * FEE_DUFF_PER_BYTE, 8)
             if not fee:
                 fee = MIN_TX_FEE
@@ -828,7 +828,7 @@ class SendFundsDestination(QtWidgets.QWidget, WndUtils):
 
     def display_totals(self):
         recipients = self.get_number_of_recipients()
-        bytes = (self.inputs_count * 148) + (recipients * 34) + 10
+        bytes = (self.inputs_count * 148) + (recipients * 34) + 11
         text = f'<span class="label"><b>Total value of the selected inputs:</b>&nbsp;</span><span class="value">&nbsp;{self.inputs_total_amount} Stash&nbsp;</span>'
         if self.inputs_total_amount > 0:
             text += f'<span class="label">&nbsp;<b>Inputs:</b>&nbsp;</span><span class="value">&nbsp;{self.inputs_count}&nbsp;</span>' \
