@@ -220,9 +220,9 @@ class Proposal(AttrsProtected):
         """ Calculate auto-calculated columns (eg. voting_in_progress and voting_status values). """
 
         gi = self.get_governance_info()
-        cycle_blocks = gi.get('superblockcycle', 16616)
-        cycle_seconds = cycle_blocks * 2.5 * 60
-        self.budget_cycle_hours = round(cycle_blocks * 2.5)
+        cycle_blocks = gi.get('superblockcycle', 43830)
+        cycle_seconds = cycle_blocks * 1.0 * 60
+        self.budget_cycle_hours = round(cycle_blocks * 1.0)
 
         payment_start = self.get_value('payment_start')
         if payment_start:
@@ -1056,8 +1056,8 @@ class ProposalsDlg(QDialog, ui_proposals.Ui_ProposalsDlg, wnd_utils.WndUtils):
 
             # get the date-time of the last superblock and calculate the date-time of the next one
             self.governanceinfo = self.stashd_intf.getgovernanceinfo()
-            cycle_blocks = self.governanceinfo.get('superblockcycle', 16616)
-            self.budget_cycle_days = round(cycle_blocks * 2.5 / 60 /24, 3)
+            cycle_blocks = self.governanceinfo.get('superblockcycle', 43830)
+            self.budget_cycle_days = round(cycle_blocks * 1.0 / 60 /24, 3)
             self.propsModel.set_budget_cycle_days(self.budget_cycle_days)
 
             sb_last = self.governanceinfo.get('lastsuperblock')
@@ -1065,7 +1065,7 @@ class ProposalsDlg(QDialog, ui_proposals.Ui_ProposalsDlg, wnd_utils.WndUtils):
             sb_cycle = round(self.governanceinfo.get('superblockcycle') / 10)
             self.next_budget_amount = float(self.stashd_intf.getsuperblockbudget(sb_next))
 
-            # superblocks occur every 16616 blocks (approximately 28.8 days)
+            # superblocks occur every 43830 blocks (approximately 28.8 days)
             cur_block = self.stashd_intf.getblockcount()
 
             sb_last_hash = self.stashd_intf.getblockhash(sb_last)
@@ -1075,15 +1075,15 @@ class ProposalsDlg(QDialog, ui_proposals.Ui_ProposalsDlg, wnd_utils.WndUtils):
             if cur_block > 0 and cur_block <= sb_next:
                 cur_hash = self.stashd_intf.getblockhash(cur_block)
                 cur_bh = self.stashd_intf.getblockheader(cur_hash)
-                self.next_superblock_time = cur_bh['time'] + (sb_next - cur_block) * 2.5 * 60
+                self.next_superblock_time = cur_bh['time'] + (sb_next - cur_block) * 1.0 * 60
 
             if self.next_superblock_time == 0:
-                self.next_superblock_time = last_bh['time'] + (sb_next - sb_last) * 2.5 * 60
+                self.next_superblock_time = last_bh['time'] + (sb_next - sb_last) * 1.0 * 60
 
             deadline_block = sb_next - sb_cycle
             self.voting_deadline_passed = deadline_block <= cur_block < sb_next
 
-            self.next_voting_deadline = self.next_superblock_time - (sb_cycle * 2.5 * 60)
+            self.next_voting_deadline = self.next_superblock_time - (sb_cycle * 1.0 * 60)
             self.display_budget_summary()
 
         except Exception as e:
