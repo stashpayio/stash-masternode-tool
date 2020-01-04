@@ -342,8 +342,10 @@ def from_string_to_bytes(a):
 def electrum_sig_hash(message):
     """
     Based on project: https://github.com/chaeplin/stashmnb.
+    First byte refers to magic string length (in hex).
+    Refer to https://bitcointalk.org/index.php?topic=995339.0
     """
-    padded = b"\x19DarkCoin Signed Message:\n" + \
+    padded = b"\x16Stash Signed Message:\n" + \
         num_to_varint(len(message)) + from_string_to_bytes(message)
     return bitcoin.dbl_sha256(padded)
 
@@ -353,7 +355,7 @@ def ecdsa_sign(msg: str, wif_priv_key: str, stash_network: str):
     """
 
     v, r, s = bitcoin.ecdsa_raw_sign(electrum_sig_hash(msg), wif_priv_key)
-    sig = bitcoin.encode_sig(v, r, s)
+    sig = bitcoin.encode_sig(v, r, s)    
     pubkey = bitcoin.privkey_to_pubkey(wif_to_privkey(wif_priv_key, stash_network))
 
     ok = bitcoin.ecdsa_raw_verify(electrum_sig_hash(msg), bitcoin.decode_sig(sig), pubkey)
