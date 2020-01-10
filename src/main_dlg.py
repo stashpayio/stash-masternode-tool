@@ -1381,7 +1381,8 @@ class MainWindow(QMainWindow, WndUtils, ui_main_dlg.Ui_MainWindow):
             if ret['overall'].startswith('Successfully decoded broadcast messages for 1 masternodes'):
                 stashd_version = {70208: 'v0.12.2',
                                  70209: 'v0.12.3',
-                                 70210: 'v0.12.3',
+                                 70210: 'v0.12.6',
+                                 70211: 'v0.12.7',
                                  70213: 'v0.13.x'}.get(mn_protocol_version, '')
                 if stashd_version:
                     stashd_version = f', stashd {stashd_version}'
