@@ -2582,6 +2582,8 @@ class ProposalsDlg(QDialog, ui_proposals.Ui_ProposalsDlg, wnd_utils.WndUtils):
                                          mn_info.masternode_config.get_current_key_for_voting(
                                              self.app_config, self.stashd_intf)), self.app_config.stash_network)))
                         log.info('masternode_tx_hash: %s' % str(mn_info.masternode_config.collateralTx))
+                        log.info('masternode current key for voting: %s' % str(mn_info.masternode_config.get_current_key_for_voting(
+                                             self.app_config, self.stashd_intf)))
                         log.info('masternode_tx_index: %s' % str(mn_info.masternode_config.collateralTxIndex))
                         log.info('governance_hash: %s' % prop_hash)
                         log.info('vote_sig: %s' % vote_sig)
