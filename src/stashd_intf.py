@@ -324,10 +324,17 @@ class StashdSSH(object):
                                     try:
                                         conf_lines = self.remote_command('cat ' + stash_conf_file)
                                     except Exception as e:
-                                        # second method did not suceed, so assume, that conf file is located
+                                        # second method did not succeed, so assume, that conf file is located
                                         # i /home/<username>/.stashcore directory
-                                        stash_conf_file = '/home/' + self.username + '/.stashcore/stash.conf'
-                                        conf_lines = self.remote_command('cat ' + stash_conf_file)
+                                        try:
+                                            stash_conf_file = '/home/' + self.username + '/.stashcore/stash.conf'
+                                            conf_lines = self.remote_command('cat ' + stash_conf_file)
+                                        # If the node was seutp with https://github.com/stashpayio/deploy/blob/master/scripts/install-node.sh
+                                        # then check stashcore user location /home/stashcore/.stashcore/stash.conf
+                                        # TODO allow user to override conf path
+                                        except Exception as e:
+                                            stash_conf_file = '/home/' + 'stashcore' + '/.stashcore/stash.conf'
+                                            conf_lines = self.remote_command('cat ' + stash_conf_file)
 
                         for line in conf_lines:
                             elems = [e.strip() for e in line.split('=')]
