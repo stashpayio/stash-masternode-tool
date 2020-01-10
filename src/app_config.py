@@ -153,7 +153,7 @@ class AppConfig(object):
 
         self.check_for_updates = True
         self.backup_config_file = True
-        self.read_proposals_external_attributes = True  # if True, some additional attributes will be downloaded from
+        self.read_proposals_external_attributes = False  # if True, some additional attributes will be downloaded from
                                                         # external sources
         self.dont_use_file_dialogs = False
         self.confirm_when_voting = True
