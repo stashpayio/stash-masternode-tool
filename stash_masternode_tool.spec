@@ -47,8 +47,17 @@ lib_path = next(p for p in sys.path if 'site-packages' in p)
 
 add_data_file(os.path.join(lib_path, 'bitcoin/english.txt'), '/bitcoin')
 add_data_file(os.path.join(lib_path, 'mnemonic/wordlist/english.txt'), '/mnemonic/wordlist')
-add_data_file(os.path.join(lib_path, 'trezorlib/coins.json'), '/trezorlib')
-add_data_file(os.path.join(lib_path, 'trezorlib/transport'), 'trezorlib/transport')
+
+# Use a custom trezorlib with version override.
+# See https://github.com/stashpayio/trezor-firmware/commit/cff481b842550f8ac8f85a31044c723a773925dc
+# add_data_file(os.path.join(lib_path, 'trezorlib/coins.json'), '/trezorlib')
+# add_data_file(os.path.join(lib_path, 'trezorlib/transport'), 'trezorlib/transport')
+
+src_path = next(p for p in sys.path if 'src/trezor' in p)
+
+add_data_file(os.path.join(src_path, 'trezorlib/coins.json'), '/trezorlib')
+add_data_file(os.path.join(src_path, 'trezorlib/transport'), 'trezorlib/transport')
+
 if os_type == 'darwin':
     add_binary_file('/usr/local/lib/libusb-1.0.dylib', '.')
 elif os_type == 'win32':
