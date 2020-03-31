@@ -6,8 +6,8 @@
     "linux": "https://github.com/stashpayio/stash-masternode-tool/releases/download/v0.9.22/StashMasternodeTool_0.9.22-hotfix6.linux.tar.gz"
   },
   "defaultStashdProtocol": {
-    "mainnet": 70210,
-    "testnet": 70210
+    "mainnet": 70211,
+    "testnet": 70211
   },
   "sporks": [
     {
