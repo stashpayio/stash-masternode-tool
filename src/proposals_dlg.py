@@ -33,6 +33,7 @@ import app_utils
 import base58
 import wnd_utils as wnd_utils
 import stash_utils
+import webbrowser
 from app_config import MasternodeConfig, InputKeyType
 from common import AttrsProtected
 from stashd_intf import StashdIndexException, Masternode
@@ -74,6 +75,7 @@ CACHE_ITEM_PROPOSALS_COLUMNS = 'ProposalsDlg_ProposalsColumnsCfg'
 CACHE_ITEM_ONLY_ONLY_ACTIVE_PROPOSALS = 'ProposalsDlg_OnlyActiveProposals'
 CACHE_ITEM_ONLY_ONLY_NEW_PROPOSALS = 'ProposalsDlg_OnlyNewProposals'
 CACHE_ITEM_ONLY_ONLY_NOT_VOTED_PROPOSALS = 'ProposalsDlg_OnlyNotVotedProposals'
+URL_PROPOSAL_GENERATOR = 'https://cloudflare-ipfs.com/ipfs/QmZwvHG7QWyWGTbCYgRv3ChK6qqc7rvq16fbjUf87TFNje/'
 
 
 log = logging.getLogger('smt.proposals')
@@ -1747,6 +1749,10 @@ class ProposalsDlg(QDialog, ui_proposals.Ui_ProposalsDlg, wnd_utils.WndUtils):
             log.exception("Exception occurred while displaing proposals.")
             self.lblMessage.setVisible(False)
             raise Exception('Error occurred while displaying proposals: ' + str(e))
+
+    @pyqtSlot()
+    def on_btnCreateProposal_clicked(self):
+        webbrowser.open_new_tab(URL_PROPOSAL_GENERATOR)
 
     @pyqtSlot()
     def on_btnProposalsRefresh_clicked(self):

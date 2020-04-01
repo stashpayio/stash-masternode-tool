@@ -48,6 +48,19 @@
       <number>6</number>
      </property>
      <item>
+      <widget class="QPushButton" name="btnCreateProposal">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="text">
+        <string>Create...</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="btnProposalsRefresh">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
@@ -309,8 +322,8 @@
             <rect>
              <x>0</x>
              <y>0</y>
-             <width>409</width>
-             <height>66</height>
+             <width>916</width>
+             <height>369</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_3">

@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file '/Users/blogin/PycharmProjects/DMT-git/src/ui/ui_proposals.ui'
+# Form implementation generated from reading ui file 'ui_proposals.ui'
 #
-# Created by: PyQt5 UI code generator 5.9.2
+# Created by: PyQt5 UI code generator 5.13.2
 #
 # WARNING! All changes made in this file will be lost!
 
+
 from PyQt5 import QtCore, QtGui, QtWidgets
+
 
 class Ui_ProposalsDlg(object):
     def setupUi(self, ProposalsDlg):
@@ -25,6 +27,14 @@ class Ui_ProposalsDlg(object):
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setSpacing(6)
         self.horizontalLayout.setObjectName("horizontalLayout")
+        self.btnCreateProposal = QtWidgets.QPushButton(ProposalsDlg)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.btnCreateProposal.sizePolicy().hasHeightForWidth())
+        self.btnCreateProposal.setSizePolicy(sizePolicy)
+        self.btnCreateProposal.setObjectName("btnCreateProposal")
+        self.horizontalLayout.addWidget(self.btnCreateProposal)
         self.btnProposalsRefresh = QtWidgets.QPushButton(ProposalsDlg)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)
@@ -134,7 +144,7 @@ class Ui_ProposalsDlg(object):
         self.scrollAreaVoting.setWidgetResizable(True)
         self.scrollAreaVoting.setObjectName("scrollAreaVoting")
         self.scrollAreaVotingContents = QtWidgets.QWidget()
-        self.scrollAreaVotingContents.setGeometry(QtCore.QRect(0, 0, 409, 66))
+        self.scrollAreaVotingContents.setGeometry(QtCore.QRect(0, 0, 916, 369))
         self.scrollAreaVotingContents.setObjectName("scrollAreaVotingContents")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.scrollAreaVotingContents)
         self.verticalLayout_3.setObjectName("verticalLayout_3")
@@ -263,6 +273,7 @@ class Ui_ProposalsDlg(object):
     def retranslateUi(self, ProposalsDlg):
         _translate = QtCore.QCoreApplication.translate
         ProposalsDlg.setWindowTitle(_translate("ProposalsDlg", "Dialog"))
+        self.btnCreateProposal.setText(_translate("ProposalsDlg", "Create..."))
         self.btnProposalsRefresh.setText(_translate("ProposalsDlg", "Refresh"))
         self.btnProposalsSaveToCSV.setText(_translate("ProposalsDlg", "Save to CSV..."))
         self.btnProposalsColumns.setText(_translate("ProposalsDlg", "Columns..."))
