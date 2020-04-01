@@ -26,6 +26,12 @@ You can build Stash Masternode Tool for macOS by opening the Terminal app and ru
 
   `Python 3.6.4`
 
+* Install *libusb*:
+
+  ```
+  brew install libusb
+  ```
+
 * Install *virtualenv*:
 
   ```
