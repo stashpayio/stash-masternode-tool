@@ -76,3 +76,21 @@ You can build Stash Masternode Tool for macOS by opening the Terminal app and ru
 
 
 Once the build has completed successfully, a compressed macOS executable file will be created in the ***~/projects/dist/all*** directory. An uncompressed app package (*StashMasternodeTool.app*) can be found in the ***~/projects/dist/mac*** directory.
+
+* Troubleshooting
+
+  If you receive this error (using PyInstaller 3.6):
+  ```
+  ModuleNotFoundError: No module named 'pkg_resources.py2_warn'
+  ```
+  This can be fixed in two different ways:
+
+  A. By installing the latest PyInstaller from the git repo (tested with PyInstaller 4.0.dev0+g3e6f7dc7)
+  ```
+  pip uninstall pyinstaller
+  pip install git+https://github.com/pyinstaller/pyinstaller.git
+  ```
+  B. By downgrading setuptools before v45.0.0 (tested with setuptools 44.1.0)
+  ```
+  pip install --upgrade 'setuptools<45.0.0'
+  ```
