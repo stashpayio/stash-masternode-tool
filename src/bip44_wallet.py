@@ -16,12 +16,12 @@ import hw_intf
 from common import CancelException
 from stash_utils import bip32_path_string_to_n, pubkey_to_address, bip32_path_n_to_string, bip32_path_string_append_elem
 from stashd_intf import StashdInterface
-from hw_common import HwSessionInfo
+from hw_common import HwSessionInfo, HWNotConnectedException
 from db_intf import DBCache
 from thread_fun_dlg import CtrlObject
 from thread_utils import EnhRLock
 from wallet_common import Bip44AccountType, Bip44AddressType, UtxoType, TxOutputType, xpub_to_hash, Bip44Entry, \
-    address_to_hash, TxType
+    address_to_hash, TxType, CacheInconsistencyException
 from wnd_utils import WndUtils
 
 TX_QUERY_ADDR_CHUNK_SIZE = 10
@@ -40,6 +40,14 @@ log = logging.getLogger('smt.bip44_wallet')
 class BreakFetchTransactionsException(Exception):
     def __init__(self, *args, **kwargs):
         Exception.__init__(self, *args, *kwargs)
+
+
+class SwitchedHDIdentityException(Exception):
+    def __init__(self, *args, **kwargs):
+        if args or kwargs:
+            Exception.__init__(self, *args, *kwargs)
+        else:
+            Exception.__init__(self, "SwitchedHDIdentityException")
 
 
 class Bip44Wallet(QObject):
@@ -184,10 +192,14 @@ class Bip44Wallet(QObject):
         return id
 
     def validate_hd_tree(self):
-        if self.__tree_ident != self.hw_session.get_hd_tree_ident(self.__coin_name):
-            # user switched to another hw identity (e.g. enter bip39 different passphrase)
-            log.info('Switching HD identity')
-            self.clear()
+        if not self.__tree_ident:
+            self.get_hd_identity_info()
+        else:
+            if self.__tree_ident != self.hw_session.get_hd_tree_ident(self.__coin_name):
+                # user switched to another hw identity (e.g. enter bip39 different passphrase)
+                log.info('Switching HD identity')
+                self.clear()
+                raise SwitchedHDIdentityException()
 
     def get_block_height(self):
         if self.cur_block_height is None or \
@@ -350,6 +362,7 @@ class Bip44Wallet(QObject):
             if addr:
                 break
         if not addr:
+            acc = None
             addr = self.addresses_by_id.get(addr_id)
         return (addr, acc)
 
@@ -380,10 +393,10 @@ class Bip44Wallet(QObject):
         addr.last_scan_block_height = address_dict.get('last_scan_block_height', 0)
         return addr
 
-    def _fill_temp_ids_table(self, ids: List[int], db_cursor):
-        db_cursor.execute("CREATE TEMPORARY TABLE IF NOT EXISTS temp_ids(id INTEGER PRIMARY KEY)")
-        db_cursor.execute('delete from temp_ids')
-        db_cursor.executemany('insert into temp_ids(id) values(?)',
+    def _fill_temp_ids_table(self, ids: List[int], db_cursor, tab_sufix: str = ''):
+        db_cursor.execute(f"CREATE TEMPORARY TABLE IF NOT EXISTS temp_ids{tab_sufix}(id INTEGER PRIMARY KEY)")
+        db_cursor.execute(f'delete from temp_ids{tab_sufix}')
+        db_cursor.executemany(f'insert into temp_ids{tab_sufix}(id) values(?)',
                               [(id,) for id in ids])
 
     def _get_child_address(self, parent_key_entry: Bip44Entry, child_addr_index: int) -> Bip44AddressType:
@@ -424,24 +437,28 @@ class Bip44Wallet(QObject):
 
                             if addr_info.get('tree_id') and addr_info.get('tree_id') != parent_key_entry.tree_id:
                                 log.warning('Address %s stored in cache has had incorrect tree_id: %s, but it'
-                                            ' should have: %s. Correcting...', addr_info.get('id'),
+                                            ' should have: %s.', addr_info.get('id'),
                                             addr_info.get('tree_id'), parent_key_entry.tree_id)
+                                raise CacheInconsistencyException()
 
                             if addr_info.get('address_index') is not None and addr_info.get('address_index') != \
                                     child_addr_index:
                                 log.warning('Address %s stored in cache has had incorrect address_index: %s, but it'
-                                            ' should have: %s. Correcting...', addr_info.get('id'),
+                                            ' should have: %s.', addr_info.get('id'),
                                             addr_info.get('child_addr_index'), child_addr_index)
+                                raise CacheInconsistencyException()
 
                             if addr_info.get('path') and addr_info.get('path') != bip32_path:
                                 log.warning('Address %s stored in cache has had incorrect bip32_path: %s, but it'
-                                            ' should have: %s. Correcting...', addr_info.get('id'),
+                                            ' should have: %s.', addr_info.get('id'),
                                             addr_info.get('path'), bip32_path)
+                                raise CacheInconsistencyException()
 
                             if addr_info.get('parent_id') and addr_info.get('parent_id') != parent_key_entry.id:
                                 log.warning('Address %s stored in cache has had incorrect parent_id: %s, but it'
-                                            ' should have: %s. Correcting...', addr_info.get('id'),
+                                            ' should have: %s.', addr_info.get('id'),
                                             addr_info.get('parent_id'), parent_key_entry.id)
+                                raise CacheInconsistencyException()
 
                             # address wasn't initially opened as a part of xpub account scan, so update its attrs
                             db_cursor.execute('update address set parent_id=?, address_index=?, path=?, tree_id=? '
@@ -553,14 +570,15 @@ class Bip44Wallet(QObject):
             if row:
                 id, path = row
                 if path != account_bip32_path:
-                    # correct the bip32 path since this account could be opened as a xpub address before
+                    # fill the bip32 path - this entry was possibly created as a xpub address
                     db_cursor.execute('update address set path=? where id=?', (account_bip32_path, id))
                     self.db_intf.commit()
 
-                account = Bip44AccountType(self.get_tree_id(), id, xpub=xpub, address_index=account_index,
+                account = Bip44AccountType(None, id, xpub=xpub, address_index=account_index,
                                            bip32_path=account_bip32_path)
                 account.read_from_db(db_cursor)
                 account.evaluate_address_if_null(db_cursor, self.stash_network)
+
             else:
                 account = Bip44AccountType(self.get_tree_id(), id=None, xpub=xpub, address_index=account_index,
                                            bip32_path=account_bip32_path)
@@ -577,6 +595,20 @@ class Bip44Wallet(QObject):
 
             log.debug('get_account_base_address_by_index exec time: %s', time.time() - tm_begin)
         else:
+            idx = account_index - 0x80000000
+            if 0 <= idx <= 25:
+                try:
+                    # use xpub_hash to verify if the user didn't switch the wallet identity (eg. passphrase)
+                    xpub = hw_intf.get_xpub(self.hw_session, account_bip32_path)
+                    if account.xpub != xpub:
+                        raise SwitchedHDIdentityException()
+
+                except ConnectionRefusedError:
+                    raise HWNotConnectedException()
+
+                except Exception as e:
+                    raise
+
             log.debug('get_account_base_address_by_index (used cache) exec time: %s', time.time() - tm_begin)
 
         return account
@@ -589,18 +621,19 @@ class Bip44Wallet(QObject):
 
         if not account:
             if self.__tree_ident:
-                account = Bip44AccountType(self.get_tree_id(), id, xpub='', address_index=None, bip32_path=None)
+                account = Bip44AccountType(None, id, xpub='', address_index=None, bip32_path=None)
                 account.read_from_db(db_cursor)
                 self.account_by_id[id] = account
-                if account.bip32_path:
-                    self.account_by_bip32_path[account.bip32_path] = account
+                if account.tree_id == self.get_tree_id():
+                    if account.bip32_path:
+                        self.account_by_bip32_path[account.bip32_path] = account
 
-                if account.bip32_path:
-                    account.xpub = hw_intf.get_xpub(self.hw_session, account.bip32_path)
-                    account.evaluate_address_if_null(db_cursor, self.stash_network)
+                    if account.bip32_path:
+                        account.xpub = hw_intf.get_xpub(self.hw_session, account.bip32_path)
+                        account.evaluate_address_if_null(db_cursor, self.stash_network)
 
-                self._read_account_addresses(account, db_cursor)
-                self.signal_account_added(account)
+                    self._read_account_addresses(account, db_cursor)
+                    self.signal_account_added(account)
         else:
             if force_reload:
                 account.read_from_db(db_cursor)
@@ -631,22 +664,15 @@ class Bip44Wallet(QObject):
                     addr.tree_id = account.tree_id
 
                 if addr_info.get('tree_id') and addr_info.get('tree_id') != account.tree_id:
-                    # there is an issue with switching tree_id to incorrect tree (cause to be found)
-                    # here we are correcting record values
-                    addr.tree_id = account.tree_id
-                    correct_tree_id.append(addr)
                     log.warning('Address %s stored in cache has had incorrect tree_id: %s, but it'
-                                ' should have: %s. Correcting...', addr_info.get('id'),
+                                ' should have: %s.', addr_info.get('id'),
                                 addr_info.get('tree_id'), account.tree_id)
+                    raise CacheInconsistencyException()
 
                 account.add_address(addr)
                 self._address_loaded(addr)
             else:
                 addr.update_from_args(balance=add_row[4], received=add_row[5])
-
-        if correct_tree_id:
-            for a in correct_tree_id:
-                db_cursor.execute('update address set tree_id=? where id=?', (a.tree_id, a.id))
 
             self.db_intf.commit()
 
@@ -1243,7 +1269,7 @@ class Bip44Wallet(QObject):
         return None
 
     def scan_wallet_for_address(self, addr: str, check_break_process_fun: Callable,
-                                feedback_fun: Callable[[str], None]) -> Optional[Bip44AddressType]:
+                                feedback_fun: Callable[[int], None]) -> Optional[Bip44AddressType]:
         """
         Scans for a specific address. If necessary, the method fetches transactions to reveal the all used addresses.
         :param addr: the address being searched.
@@ -1329,7 +1355,8 @@ class Bip44Wallet(QObject):
             release_cursor = False
 
         try:
-            account_ids: Dict[int, int] = {}  # account ids whose balances are modified
+            accounts_to_update = []
+            cur_tree_id = self.get_tree_id()
 
             if addr_ids:
                 # update balances for specific addresses
@@ -1337,28 +1364,30 @@ class Bip44Wallet(QObject):
 
                 db_cursor.execute(
                     "select id, account_id, real_received, "
-                    "real_spent + real_received real_balance from (select a.id id, aa.id account_id, "
+                    "real_spent + real_received real_balance, tree_id from (select a.id id, aa.id account_id, "
                     "a.received, (select ifnull(sum(satoshis), 0) from tx_output o where o.address_id = a.id) "
                     "real_received, a.balance, (select ifnull(sum(satoshis), 0) "
-                    "from tx_input o where o.src_address_id = a.id) real_spent from address a "
+                    "from tx_input o where o.src_address_id = a.id) real_spent, aa.tree_id tree_id from address a "
                     "left join address ca on ca.id = a.parent_id left join address aa on aa.id = ca.parent_id "
                     "where a.id in (select id from temp_ids)) "
                     "where received <> real_received or balance <> real_received + real_spent")
             elif account:
+                account.last_verify_balance_ts = int(time.time())
                 db_cursor.execute(
-                   "select id, account_id, real_received, " 
-                   "real_spent + real_received real_balance from (select a.id id, ca.id change_id, aa.id account_id, "
+                   "select id, account_id, real_received, real_spent + real_received real_balance, "
+                   "tree_id from (select a.id id, ca.id change_id, aa.id account_id, "
                    "a.received, (select ifnull(sum(satoshis), 0) from tx_output o where o.address_id = a.id) "
                    "real_received, a.balance, (select ifnull(sum(satoshis), 0) "
-                   "from tx_input o where o.src_address_id = a.id) real_spent from address a "
+                   "from tx_input o where o.src_address_id = a.id) real_spent, aa.tree_id tree_id from address a "
                    "join address ca on ca.id = a.parent_id join address aa on aa.id = ca.parent_id where aa.id=?) "
                    "where received <> real_received or balance <> real_received + real_spent", (account.id,))
             else:
                 raise Exception('Both arguments account_id and addr_ids are empty')
 
-            for addr_id, acc_id, real_received, real_balance in db_cursor.fetchall():
-                if acc_id is not None and acc_id not in account_ids:
-                    account_ids[acc_id] = acc_id
+            for addr_id, acc_id, real_received, real_balance, tree_id in db_cursor.fetchall():
+                if acc_id is not None and acc_id not in accounts_to_update:
+                    # after updating balances of the addresses, update balance the related accounts
+                    accounts_to_update.append(acc_id)
 
                 db_cursor.execute('update address set balance=?, received=? where id=?',
                                   (real_balance, real_received, addr_id))
@@ -1368,40 +1397,37 @@ class Bip44Wallet(QObject):
                         address = account.address_by_id(addr_id)
                     else:
                         address, account = self._find_address_item_in_cache_by_id(addr_id)
+
                     if address:
                         address.balance = real_balance
                         address.received = real_received
                         self.signal_address_data_changed(account, address)
 
-            # update balance/received at the account level
-            for addr_id in account_ids:
-                db_cursor.execute(
-                    "update address set balance=(select sum(a.balance) from address ca join address a "
-                    "on a.parent_id=ca.id where ca.parent_id=address.id), received=(select sum(a.received) "
-                    "from address ca join address a on a.parent_id=ca.id where ca.parent_id=address.id) where id=?",
-                    (addr_id,))
+            if account and account.id not in accounts_to_update:
+                accounts_to_update.append(account.id)
 
-                account = self._get_account_by_id(addr_id, db_cursor, force_reload=True)
-                if account:
-                    self.signal_account_data_changed(account)
+            self._fill_temp_ids_table(accounts_to_update, db_cursor)
+            db_cursor.execute(
+                "select balance, real_balance, received, real_received, id, tree_id from ("
+                "  select aa.id, aa.tree_id, aa.balance,"
+                "       (select ifnull(sum(a.balance),0) from address ca join address a"
+                "            on a.parent_id=ca.id where ca.parent_id=aa.id) real_balance,"
+                "       aa.received,"
+                "       (select ifnull(sum(a.received),0) from address ca join address a "
+                "           on a.parent_id=ca.id where ca.parent_id=aa.id) real_received "
+                "from address aa where aa.id in (select id from temp_ids)) " 
+                "where balance<>real_balance or received<>real_received")
 
-            if account is not None and account.id not in account_ids:
-                # update balance/received of the account if it was inconsistent with its the balance of its child
-                # addresses when none of these address was modified during the current execution
-                db_cursor.execute(
-                    "select id, real_balance, real_received from (select id, balance, received, "
-                    "(select ifnull(sum(a.balance),0) from address ca join address a on a.parent_id=ca.id "
-                    "where ca.parent_id=address.id) real_balance, (select ifnull(sum(a.received),0) from address ca "
-                    "join address a on a.parent_id=ca.id where ca.parent_id=address.id) real_received from address "
-                    "where id=?) "
-                    "where received <> real_received or balance <> real_balance", (account.id,))
+            for balance, real_balance, received, real_received, acc_id, acc_tree_id in db_cursor.fetchall():
+                db_cursor.execute('update address set balance=?, received=? where id=?',
+                                  (real_balance, real_received, acc_id))
 
-                for addr_id, real_balance, real_received in db_cursor.fetchall():
-                    db_cursor.execute('update address set balance=?, received=? where id=?',
-                                      (real_balance, real_received, addr_id))
-
-                    account = self._get_account_by_id(addr_id, db_cursor, force_reload=True)
-                    self.signal_account_data_changed(account)
+                if cur_tree_id and acc_tree_id == cur_tree_id:
+                    account = self._get_account_by_id(acc_id, db_cursor, force_reload=True)
+                    if account:
+                        account.balance = real_balance
+                        account.received = real_received
+                        self.signal_account_data_changed(account)
 
         finally:
             if db_cursor.connection.total_changes > 0:
@@ -1439,8 +1465,8 @@ class Bip44Wallet(QObject):
         utxo.get_cur_block_height_fun = self.get_block_height_nofetch
         return utxo
 
-    def list_utxos_for_account(self, account_id: Optional[int], only_new = False, filter_by_satoshis: int = None) -> \
-            Generator[UtxoType, None, None]:
+    def list_utxos_for_account(self, account_id: Optional[int], only_new = False,
+                               filter_by_satoshis: Optional[int] = None) -> Generator[UtxoType, None, None]:
         """
         :param account_id: database id of the account's record or None if listing for all accounts of the current
           hd tree if.
@@ -1491,22 +1517,30 @@ class Bip44Wallet(QObject):
         diff = time.time() - tm_begin
         log.debug('list_utxos_for_account exec time: %ss', diff)
 
-    def list_utxos_for_addresses(self, address_ids: List[int], only_new = False) -> Generator[UtxoType, None, None]:
+    def list_utxos_for_addresses(self, address_ids: List[int], only_new = False,
+                                 filter_by_satoshis: Optional[int] = None) -> Generator[UtxoType, None, None]:
         db_cursor = self.db_intf.get_cursor()
         try:
-            in_part = ','.join(['?'] * len(address_ids))
             sql_text = "select o.id, tx.block_height, tx.coinbase,tx.block_timestamp, tx.tx_hash, o.output_index, " \
                        "o.satoshis, o.address_id from tx_output o join address a" \
                        " on a.id=o.address_id join tx on tx.id=o.tx_id where (spent_tx_id is null " \
-                       " or spent_input_index is null) and a.id in (" + in_part + ')'
+                       " or spent_input_index is null) and a.id in (select id from temp_ids2)"
+
+            params = []
+            self._fill_temp_ids_table(address_ids, db_cursor, tab_sufix='2')
 
             if only_new:
                 # limit returned utxos only to those existing in the self.utxos_added list
                 self._fill_temp_ids_table([id for id in self.utxos_added], db_cursor)
                 sql_text += ' and o.id in (select id from temp_ids)'
+
+            if filter_by_satoshis:
+                sql_text += ' and o.satoshis=?'
+                params.append(filter_by_satoshis)
+
             sql_text += " order by tx.block_height desc"
 
-            db_cursor.execute(sql_text, address_ids)
+            db_cursor.execute(sql_text, params)
 
             for id, block_height, coinbase, block_timestamp, tx_hash, \
                 output_index, satoshis, address_id in db_cursor.fetchall():
@@ -1660,6 +1694,10 @@ class Bip44Wallet(QObject):
 
             for id, in db_cursor.fetchall():
                 acc = self._get_account_by_id(id, db_cursor)
+
+                if not acc.last_verify_balance_ts:
+                    self._update_addr_balances(acc, None, db_cursor)
+
                 yield acc
         finally:
             self._process_addresses_created(db_cursor)
@@ -1686,6 +1724,10 @@ class Bip44Wallet(QObject):
                 try:
                     account_address_index = 0x80000000 + account_index
                     account = self._get_account_by_index(account_address_index, db_cursor)
+
+                    if not account.last_verify_balance_ts:
+                        self._update_addr_balances(account, None, db_cursor)
+
                     for change in (0, 1):
                         if check_break_process_fun and check_break_process_fun():
                             break

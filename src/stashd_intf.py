@@ -3,13 +3,12 @@
 # Author: Bertrand256
 # Created on: 2017-03
 import decimal
+import functools
 import json
 
-import bitcoin
 import os
 import re
 import socket
-import sqlite3
 import ssl
 import threading
 import time
@@ -17,20 +16,20 @@ import datetime
 import logging
 from PyQt5.QtCore import QThread
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException, EncodeDecimal
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 from paramiko import AuthenticationException, PasswordRequiredException, SSHException
-from paramiko.ssh_exception import NoValidConnectionsError
+from paramiko.ssh_exception import NoValidConnectionsError, BadAuthenticationType
 from typing import List, Dict, Union, Callable, Optional
 import app_cache
-import app_defs
-import app_utils
 from app_config import AppConfig
 from random import randint
 from wnd_utils import WndUtils
 import socketserver
 import select
-from PyQt5.QtWidgets import QMessageBox
 from psw_cache import SshPassCache
 from common import AttrsProtected, CancelException
+
 
 log = logging.getLogger('smt.stashd_intf')
 
@@ -44,7 +43,7 @@ except ImportError:
 # how many seconds cached masternodes data are valid; cached masternode data is used only for non-critical
 # features
 MASTERNODES_CACHE_VALID_SECONDS = 60 * 60  # 60 minutes
-TX_SEND_SIMULATION_MODE = False
+PROTX_CACHE_VALID_SECONDS = 3 * 60 * 60  # 60 minutes
 
 
 class ForwardServer (socketserver.ThreadingTCPServer):
@@ -155,7 +154,8 @@ class StashdConnectionError(Exception):
 
 
 class StashdSSH(object):
-    def __init__(self, host, port, username, on_connection_broken_callback=None):
+    def __init__(self, host, port, username, on_connection_broken_callback=None, auth_method: str = 'password',
+                 private_key_path: str = ''):
         self.host = host
         self.port = port
         self.username = username
@@ -165,6 +165,8 @@ class StashdSSH(object):
         self.connected = False
         self.connection_broken = False
         self.ssh_thread = None
+        self.auth_method = auth_method  #  'any', 'password', 'key_pair', 'ssh_agent'
+        self.private_key_path = private_key_path
         self.on_connection_broken_callback = on_connection_broken_callback
 
     def __del__(self):
@@ -201,7 +203,7 @@ class StashdSSH(object):
             if channel:
                 channel.close()
 
-    def connect(self):
+    def connect(self) -> bool:
         import paramiko
         if self.ssh is None:
             self.ssh = paramiko.SSHClient()
@@ -211,11 +213,26 @@ class StashdSSH(object):
 
         while True:
             try:
-                self.ssh.connect(self.host, port=int(self.port), username=self.username, password=password)
+                if self.auth_method == 'any':
+                    self.ssh.connect(self.host, port=int(self.port), username=self.username, password=password)
+                elif self.auth_method == 'password':
+                    self.ssh.connect(self.host, port=int(self.port), username=self.username, password=password,
+                                     look_for_keys=False, allow_agent=False)
+                elif self.auth_method == 'key_pair':
+                    if not self.private_key_path:
+                        raise Exception('No RSA private key path was provided.')
+
+                    self.ssh.connect(self.host, port=int(self.port), username=self.username, password=password,
+                                     key_filename=self.private_key_path, look_for_keys=False, allow_agent=False)
+                elif self.auth_method == 'ssh_agent':
+                    self.ssh.connect(self.host, port=int(self.port), username=self.username, password=password,
+                                     look_for_keys=False, allow_agent=True)
+
                 self.connected = True
                 if password:
                     SshPassCache.save_password(self.username, self.host, password)
                 break
+
             except PasswordRequiredException as e:
                 # private key with password protection is used; ask user for password
                 pass_message = "Enter passphrase for <b>private key</b> or password for %s" % \
@@ -225,6 +242,9 @@ class StashdSSH(object):
                     if password:
                         break
 
+            except BadAuthenticationType as e:
+                raise Exception(str(e))
+
             except AuthenticationException as e:
                 # This exception will be raised in the following cases:
                 #  1. a private key with password protectection is used but the user enters incorrect password
@@ -233,8 +253,13 @@ class StashdSSH(object):
                 # So, in the first case, the second query for password will ask for normal password to server, not
                 #  for a private key.
 
-                if password is not None:
-                    WndUtils.errorMsg(message='Incorrect password, try again...')
+                if self.auth_method == 'key_pair':
+                    WndUtils.errorMsg(message=f'Authentication failed for private key: {self.private_key_path} '
+                    f'(username {self.username}).')
+                    break
+                else:
+                    if password is not None:
+                        WndUtils.errorMsg(message='Incorrect password, try again...')
 
                 while True:
                     password = SshPassCache.get_password(self.username, self.host, message=pass_message)
@@ -250,7 +275,10 @@ class StashdSSH(object):
                 else:
                     raise
             except Exception as e:
+                log.exception(str(e))
                 raise
+
+        return self.connected
 
     def on_tunnel_thread_finish(self):
         self.ssh_thread = None
@@ -371,83 +399,111 @@ class StashdIndexException(JSONRPCException):
                        'Changing these parameters requires to execute stashd with "-reindex" option (linux: ./stashd -reindex)'
 
 
-def control_rpc_call(func):
+def control_rpc_call(_func=None, *, encrypt_rpc_arguments=False, allow_switching_conns=True):
     """
-    Decorator function for catching HTTPConnection timeout and then resetting the connection.
-    :param func: StashdInterface's method decorated
+    Decorator dedicated to functions related to RPC calls, taking care of switching an active connection if the
+    current one becomes faulty. It also performs argument encryption for configured RPC calls.
     """
-    def catch_timeout_wrapper(*args, **kwargs):
-        ret = None
-        last_exception = None
-        self = args[0]
-        self.mark_call_begin()
-        try:
-            log.debug('Trying to acquire http_lock')
-            self.http_lock.acquire()
-            log.debug('Acquired http_lock')
-            last_conn_reset_time = None
-            for try_nr in range(1, 5):
-                try:
+
+    def control_rpc_call_inner(func):
+
+        @functools.wraps(func)
+        def catch_timeout_wrapper(*args, **kwargs):
+            ret = None
+            last_exception = None
+            self = args[0]
+            self.mark_call_begin()
+            try:
+                self.http_lock.acquire()
+                last_conn_reset_time = None
+                for try_nr in range(1, 5):
                     try:
-                        log.debug('Beginning call of "' + str(func) + '"')
-                        begin_time = time.time()
-                        ret = func(*args, **kwargs)
-                        log.debug('Finished call of "' + str(func) + '". Call time: ' +
-                                      str(time.time() - begin_time) + 's.')
-                        last_exception = None
-                        self.mark_cur_conn_cfg_is_ok()
-                        break
+                        try:
+                            if encrypt_rpc_arguments:
+                                if self.cur_conn_def:
+                                    pubkey = self.cur_conn_def.get_rpc_encryption_pubkey_object()
+                                else:
+                                    pubkey = None
 
-                    except (ConnectionResetError, ConnectionAbortedError, httplib.CannotSendRequest,
-                            BrokenPipeError) as e:
-                        log.warning('Error while calling of "' + str(func) + ' (1)". Details: ' + str(e))
-                        if last_conn_reset_time:
-                            raise StashdConnectionError(e)  # switch to another config if possible
-                        else:
-                            last_exception = e
-                            self.reset_connection()  # rettry with the same connection
+                                if pubkey:
+                                    args_str = json.dumps(args[1:])
+                                    max_chunk_size = int(pubkey.key_size / 8) - 75
 
-                    except JSONRPCException as e:
-                        log.error('Error while calling of "' + str(func) + ' (2)". Details: ' + str(e))
-                        if e.code == -5 and e.message == 'No information available for address':
-                            raise StashdIndexException(e)
-                        elif e.error.get('message','').find('403 Forbidden') >= 0 or \
-                             e.error.get('message', '').find('502 Bad Gateway') >= 0:
-                            self.http_conn.close()
+                                    encrypted_parts = []
+                                    while args_str:
+                                        data_chunk = args_str[:max_chunk_size]
+                                        args_str = args_str[max_chunk_size:]
+                                        ciphertext = pubkey.encrypt(data_chunk.encode('ascii'),
+                                                                    padding.OAEP(
+                                                                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                                                        algorithm=hashes.SHA256(),
+                                                                        label=None))
+                                        encrypted_parts.append(ciphertext.hex())
+                                    args = (args[0], 'DMTENCRYPTEDV1') + tuple(encrypted_parts)
+                                    log.info(
+                                        'Arguments of the "%s" call have been encrypted with the RSA public key of '
+                                        'the RPC node.', func.__name__)
+
+                            ret = func(*args, **kwargs)
+
+                            last_exception = None
+                            self.mark_cur_conn_cfg_is_ok()
+                            break
+
+                        except (ConnectionResetError, ConnectionAbortedError, httplib.CannotSendRequest,
+                                BrokenPipeError) as e:
+                            # this exceptions occur usually when the established connection gets disconnected after
+                            # some time of inactivity; try to reconnect within the same connection configuration
+                            log.warning('Error while calling of "' + str(func) + ' (1)". Details: ' + str(e))
+                            if last_conn_reset_time:
+                                raise StashdConnectionError(e)  # switch to another config if possible
+                            else:
+                                last_exception = e
+                                last_conn_reset_time = time.time()
+                                self.reset_connection()  # retry with the same connection
+
+                        except (socket.gaierror, ConnectionRefusedError, TimeoutError, socket.timeout,
+                                NoValidConnectionsError) as e:
+                            # exceptions raised most likely by not functioning stashd node; try to switch to another node
+                            # if there is any in the config
+                            log.warning('Error while calling of "' + str(func) + ' (3)". Details: ' + str(e))
                             raise StashdConnectionError(e)
-                        elif e.code in (-32603,):
-                            # for these error codes don't retry the request with another rpc connetion
-                            #  -32603: failure to verify vote
-                            raise
+
+                        except JSONRPCException as e:
+                            log.error('Error while calling of "' + str(func) + ' (2)". Details: ' + str(e))
+                            err_message = e.error.get('message','').lower()
+                            self.http_conn.close()
+                            if e.code == -5 and e.message == 'No information available for address':
+                                raise StashdIndexException(e)
+                            elif err_message.find('502 bad gateway') >= 0 or err_message.find('unknown error') >= 0:
+                                raise StashdConnectionError(e)
+                            else:
+                                raise
+
+                    except StashdConnectionError as e:
+                        # try another net config if possible
+                        log.error('Error while calling of "' + str(func) + '" (4). Details: ' + str(e))
+
+                        if not allow_switching_conns or not self.switch_to_next_config():
+                            self.last_error_message = str(e.org_exception)
+                            raise e.org_exception  # couldn't use another conn config, raise last exception
                         else:
-                            raise
+                            try_nr -= 1  # another config retries do not count
+                            last_exception = e.org_exception
+                    except Exception:
+                        raise
+            finally:
+                self.http_lock.release()
 
-                    except (socket.gaierror, ConnectionRefusedError, TimeoutError, socket.timeout,
-                            NoValidConnectionsError) as e:
-                        # exceptions raised most likely by not functioning stashd node; try to switch to another node
-                        # if there is any in the config
-                        log.warning('Error while calling of "' + str(func) + ' (3)". Details: ' + str(e))
-                        raise StashdConnectionError(e)
+            if last_exception:
+                raise last_exception
+            return ret
+        return catch_timeout_wrapper
 
-                except StashdConnectionError as e:
-                    # try another net config if possible
-                    log.error('Error while calling of "' + str(func) + '" (4). Details: ' + str(e))
-                    if not self.switch_to_next_config():
-                        self.last_error_message = str(e.org_exception)
-                        raise e.org_exception  # couldn't use another conn config, raise last exception
-                    else:
-                        try_nr -= 1  # another config retries do not count
-                        last_exception = e.org_exception
-                except Exception:
-                    raise
-        finally:
-            self.http_lock.release()
-            log.debug('Released http_lock')
-
-        if last_exception:
-            raise last_exception
-        return ret
-    return catch_timeout_wrapper
+    if _func is None:
+        return control_rpc_call_inner
+    else:
+        return control_rpc_call_inner(_func)
 
 
 class Masternode(AttrsProtected):
@@ -455,13 +511,14 @@ class Masternode(AttrsProtected):
         AttrsProtected.__init__(self)
         self.ident = None
         self.status = None
-        self.protocol = None
         self.payee = None
         self.lastseen = None
         self.activeseconds = None
         self.lastpaidtime = None
         self.lastpaidblock = None
         self.ip = None
+        self.protx_hash: Optional[str] = None
+        self.registered_height: Optional[int] = None
         self.db_id = None
         self.marker = None
         self.modified = False
@@ -490,7 +547,7 @@ def json_cache_wrapper(func, intf, cache_file_ident, skip_cache=False,
         if intf.app_config.is_testnet():
             fname += 'testnet_'
 
-        cache_file = intf.config.tx_cache_dir + fname + cache_file_ident + '.json'
+        cache_file = intf.app_config.tx_cache_dir + fname + cache_file_ident + '.json'
         if not skip_cache:
             try:  # looking into cache first
                 with open(cache_file) as fp:
@@ -524,12 +581,11 @@ class StashdInterface(WndUtils):
                  on_connection_disconnected_callback=None):
         WndUtils.__init__(self, app_config=None)
 
-        self.config = None
+        self.app_config = None
         self.db_intf = None
         self.connections = []
         self.cur_conn_index = 0
-        self.cur_conn_def = None
-        self.conf_switch_locked = False
+        self.cur_conn_def: Optional['StashNetworkConnectionCfg'] = None
 
         # below is the connection with which particular RPC call has started; if connection is switched because of
         # problems with some nodes, switching stops if we close round and return to the starting connection
@@ -538,7 +594,7 @@ class StashdInterface(WndUtils):
         self.masternodes = []  # cached list of all masternodes (Masternode object)
         self.masternodes_by_ident = {}
         self.masternodes_by_ip_port = {}
-        self.payment_queue = []
+        self.protx_by_mn_ident: Dict[str, Dict] = {}
 
         self.ssh = None
         self.window = window
@@ -551,17 +607,14 @@ class StashdInterface(WndUtils):
         self.on_connection_successful_callback = on_connection_successful_callback
         self.on_connection_disconnected_callback = on_connection_disconnected_callback
         self.last_error_message = None
-
-        # test transaction entries to be returned by the calls of the self.getaddressdeltas method
-        self.test_txs_endpoints_by_address: Dict[str, List[Dict]] = {}
-        self.test_txs_by_txid: Dict[str, Dict] = {}
-
+        self.mempool_txes:Dict[str, Dict] = {}
         self.http_lock = threading.RLock()
 
     def initialize(self, config: AppConfig, connection=None, for_testing_connections_only=False):
-        self.config = config
         self.app_config = config
-        self.db_intf = self.config.db_intf
+        self.app_config = config
+        self.app_config = config
+        self.db_intf = self.app_config.db_intf
 
         # conn configurations are used from the first item in the list; if one fails, then next is taken
         if connection:
@@ -569,7 +622,7 @@ class StashdInterface(WndUtils):
             self.connections = [connection]
         else:
             # get connection list orderd by priority of use
-            self.connections = self.config.get_ordered_conn_list()
+            self.connections = self.app_config.get_ordered_conn_list()
 
         self.cur_conn_index = 0
         if self.connections:
@@ -579,11 +632,6 @@ class StashdInterface(WndUtils):
 
         if not for_testing_connections_only:
             self.load_data_from_db_cache()
-
-    def is_current_connection_public(self):
-        if self.cur_conn_def and self.config:
-            return self.config.is_connection_public(self.cur_conn_def)
-        return False
 
     def load_data_from_db_cache(self):
         self.masternodes.clear()
@@ -596,8 +644,8 @@ class StashdInterface(WndUtils):
             tm_start = time.time()
             db_correction_duration = 0.0
             log.debug("Reading masternodes' data from DB")
-            cur.execute("SELECT id, ident, status, protocol, payee, last_seen, active_seconds,"
-                        " last_paid_time, last_paid_block, IP from MASTERNODES where smt_active=1")
+            cur.execute("SELECT id, ident, status, payee, last_seen, active_seconds,"
+                        " last_paid_time, last_paid_block, IP, queue_position from MASTERNODES where smt_active=1")
             for row in cur.fetchall():
                 db_id = row[0]
                 ident = row[1]
@@ -618,13 +666,13 @@ class StashdInterface(WndUtils):
                 mn.db_id = db_id
                 mn.ident = ident
                 mn.status = row[2]
-                mn.protocol = row[3]
-                mn.payee = row[4]
-                mn.lastseen = row[5]
-                mn.activeseconds = row[6]
-                mn.lastpaidtime = row[7]
-                mn.lastpaidblock = row[8]
-                mn.ip = row[9]
+                mn.payee = row[3]
+                mn.lastseen = row[4]
+                mn.activeseconds = row[5]
+                mn.lastpaidtime = row[6]
+                mn.lastpaidblock = row[7]
+                mn.ip = row[8]
+                mn.queue_position = row[9]
                 self.masternodes.append(mn)
                 self.masternodes_by_ident[mn.ident] = mn
                 self.masternodes_by_ip_port[mn.ip] = mn
@@ -632,7 +680,6 @@ class StashdInterface(WndUtils):
             tm_diff = time.time() - tm_start
             log.info('DB read time of %d MASTERNODES: %s s, db fix time: %s' %
                          (len(self.masternodes), str(tm_diff), str(db_correction_duration)))
-            self.update_mn_queue_values()
         except Exception as e:
             log.exception('SQLite initialization error')
         finally:
@@ -647,7 +694,7 @@ class StashdInterface(WndUtils):
 
         # get connection list orderd by priority of use
         self.disconnect()
-        self.connections = self.config.get_ordered_conn_list()
+        self.connections = self.app_config.get_ordered_conn_list()
         self.cur_conn_index = 0
         if len(self.connections):
             self.cur_conn_def = self.connections[self.cur_conn_index]
@@ -675,11 +722,8 @@ class StashdInterface(WndUtils):
         with current connection config.
         :return: True if successfully switched or False if there was no another config
         """
-        if self.conf_switch_locked:
-            return False
-
         if self.cur_conn_def:
-            self.config.conn_cfg_failure(self.cur_conn_def)  # mark connection as defective
+            self.app_config.conn_cfg_failure(self.cur_conn_def)  # mark connection as defective
         if self.cur_conn_index < len(self.connections)-1:
             idx = self.cur_conn_index + 1
         else:
@@ -699,15 +743,9 @@ class StashdInterface(WndUtils):
             log.warning('Failed to connect: no another connection configurations.')
             return False
 
-    def enable_conf_switching(self):
-        self.conf_switch_locked = True
-
-    def disable_conf_switching(self):
-        self.conf_switch_locked = False
-
     def mark_cur_conn_cfg_is_ok(self):
         if self.cur_conn_def:
-            self.config.conn_cfg_success(self.cur_conn_def)
+            self.app_config.conn_cfg_success(self.cur_conn_def)
 
     def open(self):
         """
@@ -774,7 +812,9 @@ class StashdInterface(WndUtils):
                 # RPC over SSH
                 if self.ssh is None:
                     self.ssh = StashdSSH(self.cur_conn_def.ssh_conn_cfg.host, self.cur_conn_def.ssh_conn_cfg.port,
-                                        self.cur_conn_def.ssh_conn_cfg.username)
+                                        self.cur_conn_def.ssh_conn_cfg.username,
+                                        auth_method=self.cur_conn_def.ssh_conn_cfg.auth_method,
+                                        private_key_path=self.cur_conn_def.ssh_conn_cfg.private_key_path)
                 try:
                     log.debug('starting ssh.connect')
                     self.ssh.connect()
@@ -885,10 +925,10 @@ class StashdInterface(WndUtils):
             info = self.proxy.getinfo()
             if verify_node:
                 node_under_testnet = info.get('testnet')
-                if self.config.is_testnet() and not node_under_testnet:
+                if self.app_config.is_testnet() and not node_under_testnet:
                     raise Exception('This RPC node works under Stash MAINNET, but your current configuration is '
                                     'for TESTNET.')
-                elif self.config.is_mainnet() and node_under_testnet:
+                elif self.app_config.is_mainnet() and node_under_testnet:
                     raise Exception('This RPC node works under Stash TESTNET, but your current configuration is '
                                     'for MAINNET.')
             return info
@@ -898,12 +938,15 @@ class StashdInterface(WndUtils):
     @control_rpc_call
     def issynchronized(self):
         if self.open():
-            # if connecting to HTTP(S) proxy do not check if stash daemon is synchronized
-            if self.cur_conn_def.is_http_proxy():
-                return True
-            else:
+            try:
                 syn = self.proxy.mnsync('status')
                 return syn.get('IsSynced')
+            except JSONRPCException as e:
+                if str(e).lower().find('403 forbidden') >= 0:
+                    self.http_conn.close()
+                    return True
+                else:
+                    raise
         else:
             raise Exception('Not connected')
 
@@ -925,44 +968,63 @@ class StashdInterface(WndUtils):
         else:
             raise Exception('Not connected')
 
-    def update_mn_queue_values(self):
+    def read_protx_list(self):
+        last_read_time = app_cache.get_value(f'ProtxLastReadTime_{self.app_config.stash_network}', 0, int)
+
+        if not self.protx_by_mn_ident or (int(time.time()) - last_read_time) >= PROTX_CACHE_VALID_SECONDS:
+
+            self.protx_by_mn_ident.clear()
+            protx_list = self.proxy.protx('list', 'registered', True)
+            for protx in protx_list:
+                ident = protx.get('collateralHash') + '-' + str(protx.get('collateralIndex'))
+                s = protx.get('state',{})
+                p = {
+                    'protx_hash': protx.get('proTxHash'),
+                    'registered_height': s.get('registeredHeight'),
+                    'pose_pelanlty': s.get('PoSePenalty'),
+                    'pose_received_height': s.get('PoSeRevivedHeight'),
+                    'pose_ban_height': s.get('PoSeBanHeight'),
+                    'pose_revived_height': s.get('PoSeRevivedHeight', 0)
+                }
+                self.protx_by_mn_ident[ident] = p
+        return self.protx_by_mn_ident
+
+    def update_mn_queue_values(self, masternodes: List[Masternode]):
         """
         Updates masternode payment queue order values.
         """
 
-        start_tm = time.time()
-        self.payment_queue = []
-        d = datetime.datetime.utcnow()
-        now = int(time.mktime((d.year, d.month, d.day, d.hour, d.minute, d.second, 0, 0, 0)))
-
-        for mn in self.masternodes:
+        payment_queue = []
+        for mn in masternodes:
             if mn.status == 'ENABLED':
-                # estimate payment queue position: after loading all masternodes
-                # queue_position will be used to sort mn list and count the real queue position
-                if mn.lastpaidtime == 0:
-                    mn.queue_position = mn.activeseconds
+                protx = self.protx_by_mn_ident.get(mn.ident)
+
+                if mn.lastpaidblock > 0:
+                    mn.queue_position = mn.lastpaidblock
                 else:
-                    lastpaid_ago = now - mn.lastpaidtime
-                    mn.queue_position = min(lastpaid_ago, mn.activeseconds)
-                self.payment_queue.append(mn)
+                    if protx:
+                        mn.queue_position = protx.get('registered_height')
+                    else:
+                        mn.queue_position = None
+
+                if protx:
+                    pose_revived_height = protx.get('pose_revived_height', 0)
+                    if pose_revived_height > 0 and pose_revived_height > mn.lastpaidblock:
+                        mn.queue_position = pose_revived_height
+
+                payment_queue.append(mn)
             else:
                 mn.queue_position = None
 
-        duration1 = time.time() - start_tm
-        self.payment_queue.sort(key=lambda x: x.queue_position, reverse=True)
-        duration2 = time.time() - start_tm
+        payment_queue.sort(key=lambda x: x.queue_position, reverse=False)
 
-        for mn in self.masternodes:
+        for mn in masternodes:
             if mn.status == 'ENABLED':
-                mn.queue_position = self.payment_queue.index(mn)
-            else:
-                mn.queue_position = None
-        duration3 = time.time() - start_tm
-        log.info('Masternode queue build time1: %s, time2: %s, time3: %s' %
-                     (str(duration1), str(duration2), str(duration3)))
+                mn.queue_position = payment_queue.index(mn)
 
     @control_rpc_call
-    def get_masternodelist(self, *args, data_max_age=MASTERNODES_CACHE_VALID_SECONDS) -> List[Masternode]:
+    def get_masternodelist(self, *args, data_max_age=MASTERNODES_CACHE_VALID_SECONDS,
+                           protx_data_max_age=PROTX_CACHE_VALID_SECONDS) -> List[Masternode]:
         """
         Returns masternode list, read from the Stash network or from the internal cache.
         :param args: arguments passed to the 'masternodelist' RPC call
@@ -971,73 +1033,46 @@ class StashdInterface(WndUtils):
             value of 0 forces reading of the new data from the network
         :return: list of Masternode objects, matching the 'args' arguments
         """
-        def parse_mns(mns_raw) -> List[Masternode]:
+        def parse_mns(mns: Dict[str, Dict]) -> List[Masternode]:
             """
             Parses dictionary of strings returned from the RPC to Masternode object list.
-            :param mns_raw: Dict of masternodes in format of RPC masternodelist command
+            :param mns: Dict of masternodes in format of RPC masternodelist command
             :return: list of Masternode object
             """
-            tm_begin = time.time()
+            self.read_protx_list()
             ret_list = []
-            for mn_id in mns_raw.keys():
-                mn_raw = mns_raw.get(mn_id)
-                mn_raw = mn_raw.strip()
-                elems = mn_raw.split()
-                if len(elems) >= 8:
-                    mn = Masternode()
-                    # (status, protocol, payee, lastseen, activeseconds, lastpaidtime, pastpaidblock, ip)
-                    mn.status, mn.protocol, mn.payee, mn.lastseen, mn.activeseconds, mn.lastpaidtime, \
-                        mn.lastpaidblock, mn.ip = elems
+            for mn_id in mns.keys():
+                mn_json = mns.get(mn_id)
+                mn = Masternode()
+                mn.status = mn_json.get('status')
+                mn.payee = mn_json.get('payee')
+                mn.lastseen = mn_json.get('lastseen', 0)
+                mn.activeseconds = mn_json.get('activeseconds', 0)
+                mn.lastpaidtime = mn_json.get('lastpaidtime', 0)
+                mn.lastpaidblock = mn_json.get('lastpaidblock', 0)
+                mn.ip = mn_json.get('address')
+                mn.ident = mn_id
 
-                    mn.lastseen = int(mn.lastseen)
-                    mn.activeseconds = int(mn.activeseconds)
-                    mn.lastpaidtime = int(mn.lastpaidtime)
-                    mn.lastpaidblock = int(mn.lastpaidblock)
-                    mn.ident = mn_id
-                    ret_list.append(mn)
-            duration = time.time() - tm_begin
-            log.info('Parse masternodelist time: ' + str(duration))
+                protx = self.protx_by_mn_ident.get(mn.ident)
+                if protx:
+                    mn.protx_hash = protx.get('protx_hash')
+                    mn.registered_height = protx.get('registered_height')
+
+                ret_list.append(mn)
             return ret_list
-
-        def update_masternode_data(existing_mn, new_data, cursor):
-            # update cached masternode's properties
-            existing_mn.modified = False
-            existing_mn.monitor_changes = True
-            existing_mn.ident = new_data.ident
-            existing_mn.status = new_data.status
-            existing_mn.protocol = new_data.protocol
-            existing_mn.payee = new_data.payee
-            existing_mn.lastseen = new_data.lastseen
-            existing_mn.activeseconds = new_data.activeseconds
-            existing_mn.lastpaidtime = new_data.lastpaidtime
-            existing_mn.lastpaidblock = new_data.lastpaidblock
-            existing_mn.ip = new_data.ip
-
-            # ... and finally update MN db record
-            if cursor and existing_mn.modified:
-                cursor.execute("UPDATE MASTERNODES set ident=?, status=?, protocol=?, payee=?,"
-                               " last_seen=?, active_seconds=?, last_paid_time=?, "
-                               " last_paid_block=?, ip=?"
-                               "WHERE id=?",
-                               (new_data.ident, new_data.status, new_data.protocol, new_data.payee,
-                                new_data.lastseen, new_data.activeseconds, new_data.lastpaidtime,
-                                new_data.lastpaidblock, new_data.ip, existing_mn.db_id))
 
         if self.open():
 
-            if len(args) == 1 and args[0] == 'full':
+            if len(args) == 1 and args[0] == 'json':
                 last_read_time = app_cache.get_value(f'MasternodesLastReadTime_{self.app_config.stash_network}', 0, int)
-                log.info("MasternodesLastReadTime: %d" % last_read_time)
 
                 if self.masternodes and data_max_age > 0 and \
                    int(time.time()) - last_read_time < data_max_age:
-                    log.info('Using cached masternodelist (data age: %s)' % str(int(time.time()) - last_read_time))
                     return self.masternodes
                 else:
-                    log.info('Loading masternode list from Stash daemon...')
                     mns = self.proxy.masternodelist(*args)
                     mns = parse_mns(mns)
-                    log.info('Finished loading masternode list')
+                    self.update_mn_queue_values(mns)
 
                     # mark already cached masternodes to identify those to delete
                     for mn in self.masternodes:
@@ -1060,19 +1095,43 @@ class StashdInterface(WndUtils):
                                 self.masternodes_by_ip_port[mn.ip] = mn
 
                                 if self.db_intf.db_active:
-                                    cur.execute("INSERT INTO MASTERNODES(ident, status, protocol, payee, last_seen,"
-                                            " active_seconds, last_paid_time, last_paid_block, ip, smt_active,"
-                                            " smt_create_time) "
-                                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                                            (mn.ident, mn.status, mn.protocol, mn.payee, mn.lastseen,
-                                             mn.activeseconds, mn.lastpaidtime, mn.lastpaidblock, mn.ip, 1,
-                                             datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                                    cur.execute(
+                                        "INSERT INTO MASTERNODES(ident, status, payee, last_seen,"
+                                        " active_seconds, last_paid_time, last_paid_block, ip, protx_hash, "
+                                        " registered_height, smt_active, smt_create_time, queue_position) "
+                                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                        (mn.ident, mn.status, mn.payee, mn.lastseen,
+                                         mn.activeseconds, mn.lastpaidtime, mn.lastpaidblock, mn.ip, mn.protx_hash,
+                                         mn.registered_height, 1, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                         mn.queue_position))
                                     mn.db_id = cur.lastrowid
                                     db_modified = True
                             else:
                                 existing_mn.marker = True
-                                update_masternode_data(existing_mn, mn, cur)
-                                db_modified = True
+                                existing_mn.modified = False
+                                existing_mn.monitor_changes = True
+                                existing_mn.ident = mn.ident
+                                existing_mn.status = mn.status
+                                existing_mn.payee = mn.payee
+                                existing_mn.lastseen = mn.lastseen
+                                existing_mn.activeseconds = mn.activeseconds
+                                existing_mn.lastpaidtime = mn.lastpaidtime
+                                existing_mn.lastpaidblock = mn.lastpaidblock
+                                existing_mn.ip = mn.ip
+                                existing_mn.protx_hash = mn.protx_hash
+                                existing_mn.registered_height = mn.registered_height
+                                existing_mn.queue_position = mn.queue_position
+
+                                # ... and finally update MN db record
+                                if existing_mn.modified:
+                                    cur.execute(
+                                        "UPDATE MASTERNODES set ident=?, status=?, payee=?, last_seen=?, "
+                                        "active_seconds=?, last_paid_time=?, last_paid_block=?, ip=?, protx_hash=?, "
+                                        "registered_height=?, queue_position=? WHERE id=?",
+                                        (mn.ident, mn.status, mn.payee, mn.lastseen, mn.activeseconds,
+                                         mn.lastpaidtime, mn.lastpaidblock, mn.ip, mn.protx_hash, mn.registered_height,
+                                         existing_mn.queue_position, existing_mn.db_id))
+                                    db_modified = True
 
                         # remove from the cache masternodes that no longer exist
                         for mn_index in reversed(range(len(self.masternodes))):
@@ -1082,14 +1141,13 @@ class StashdInterface(WndUtils):
                                 if self.db_intf.db_active:
                                     cur.execute("UPDATE MASTERNODES set smt_active=0, smt_deactivation_time=?"
                                                 "WHERE ID=?",
-                                                (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                                mn.db_id))
+                                                (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mn.db_id))
                                     db_modified = True
                                 self.masternodes_by_ident.pop(mn.ident,0)
                                 del self.masternodes[mn_index]
 
                         app_cache.set_value(f'MasternodesLastReadTime_{self.app_config.stash_network}', int(time.time()))
-                        self.update_mn_queue_values()
+
                     finally:
                         if db_modified:
                             self.db_intf.commit()
@@ -1099,7 +1157,6 @@ class StashdInterface(WndUtils):
                     return self.masternodes
             else:
                 mns = self.proxy.masternodelist(*args)
-                mns = parse_mns(mns)
                 return mns
         else:
             raise Exception('Not connected')
@@ -1126,6 +1183,23 @@ class StashdInterface(WndUtils):
             raise Exception('Not connected')
 
     @control_rpc_call
+    def getrawmempool(self):
+        if self.open():
+            cur_mempool_txes = self.proxy.getrawmempool()
+
+            txes_to_purge = []
+            for tx_hash in self.mempool_txes:
+                if tx_hash not in cur_mempool_txes:
+                    txes_to_purge.append(tx_hash)
+
+            for tx_hash in txes_to_purge:
+                del self.mempool_txes[tx_hash]
+
+            return cur_mempool_txes
+        else:
+            raise Exception('Not connected')
+
+    @control_rpc_call
     def getrawtransaction(self, txid, verbose, skip_cache=False):
 
         def check_if_tx_confirmed(tx_json):
@@ -1135,11 +1209,6 @@ class StashdInterface(WndUtils):
             return False
 
         if self.open():
-            if TX_SEND_SIMULATION_MODE:
-                tx = self.test_txs_by_txid.get(txid)
-                if tx:
-                    return tx
-
             tx_json = json_cache_wrapper(self.proxy.getrawtransaction, self, 'tx-' + str(verbose) + '-' + txid,
                                          skip_cache=skip_cache, accept_cache_data_fun=check_if_tx_confirmed)\
                 (txid, verbose)
@@ -1178,58 +1247,10 @@ class StashdInterface(WndUtils):
         else:
             raise Exception('Not connected')
 
-    def simulate_send_transaction(self, tx):
-        def get_test_tx_entry(address: str) -> List[Dict]:
-            txe = self.test_txs_endpoints_by_address.get(address)
-            if not txe:
-                txe = []
-                self.test_txs_endpoints_by_address[address] = txe
-            return txe
-
-        dts = self.decoderawtransaction(tx)
-        if dts:
-            txid = dts.get('txid')
-            block_height = self.getblockcount()
-
-            for idx, vin in enumerate(dts['vin']):
-                _tx = self.getrawtransaction(vin['txid'], 1)
-                if _tx:
-                    o = _tx['vout'][vin['vout']]
-                    for a in o['scriptPubKey']['addresses']:
-                        tx_in = {
-                            'txid': txid,
-                            'index': idx,
-                            'height': block_height,
-                            'satoshis': -o['valueSat'],
-                            'address': a
-                        }
-                        get_test_tx_entry(a).append(tx_in)
-
-            for idx, vin in enumerate(dts['vout']):
-                for a in vin['scriptPubKey']['addresses']:
-                    tx_out = {
-                        'txid': txid,
-                        'index': idx,
-                        'height': block_height,
-                        'satoshis': vin['valueSat'],
-                        'address': a
-                    }
-                    get_test_tx_entry(a).append(tx_out)
-
-            _tx = dict(dts)
-            _tx['hex'] = tx
-            _tx['height'] = block_height
-            self.test_txs_by_txid[txid] = _tx
-
-            return dts['txid']
-
     @control_rpc_call
     def sendrawtransaction(self, tx, use_instant_send):
         if self.open():
-            if TX_SEND_SIMULATION_MODE:
-                return self.simulate_send_transaction(tx)
-            else:
-                return self.proxy.sendrawtransaction(tx, False, use_instant_send)
+            return self.proxy.sendrawtransaction(tx, False, use_instant_send)
         else:
             raise Exception('Not connected')
 
@@ -1279,15 +1300,7 @@ class StashdInterface(WndUtils):
     @control_rpc_call
     def getaddressdeltas(self, *args):
         if self.open():
-            deltas_list = self.proxy.getaddressdeltas(*args)
-            if TX_SEND_SIMULATION_MODE and len(args) > 0 and isinstance(args[0], dict):
-                addrs = args[0].get('addresses')
-                if addrs:
-                    for a in addrs:
-                        tep = self.test_txs_endpoints_by_address.get(a)
-                        if tep:
-                            deltas_list.extend(tep)
-            return deltas_list
+            return self.proxy.getaddressdeltas(*args)
         else:
             raise Exception('Not connected')
 
@@ -1298,7 +1311,6 @@ class StashdInterface(WndUtils):
         else:
             raise Exception('Not connected')
 
-    @control_rpc_call
     def protx(self, *args):
         if self.open():
             return self.proxy.protx(*args)
@@ -1312,35 +1324,19 @@ class StashdInterface(WndUtils):
         else:
             raise Exception('Not connected')
 
-    @control_rpc_call
-    def rpc_call(self, command, *args):
-        if self.open():
+    def rpc_call(self, encrypt_rpc_arguments: bool, allow_switching_conns: bool, command: str, *args):
+        def call_command(self, *args):
             c = self.proxy.__getattr__(command)
             return c(*args)
+
+        if self.open():
+            call_command.__setattr__('__name__', command)
+            fun = control_rpc_call(call_command, encrypt_rpc_arguments=encrypt_rpc_arguments,
+                                   allow_switching_conns=allow_switching_conns)
+            c = fun(self, *args)
+            return c
         else:
             raise Exception('Not connected')
-
-    def get_spork_value(self, spork: Union[int, str]):
-        if isinstance(spork, int):
-            name = 'SPORK_' + str(spork)
-        else:
-            name = spork
-        sporks = self.spork('show')
-        for spk in sporks:
-            if spk.find(name) >= 0:
-                return sporks[spk]
-        return None
-
-    def get_spork_active(self, spork: Union[int, str]):
-        if isinstance(spork, int):
-            name = 'SPORK_' + str(spork)
-        else:
-            name = spork
-        sporks = self.spork('active')
-        for spk in sporks:
-            if spk.find(name) >= 0:
-                return sporks[spk]
-        return None
 
     @control_rpc_call
     def listaddressbalances(self, minfee):
@@ -1355,4 +1351,39 @@ class StashdInterface(WndUtils):
             return self.proxy.getblockchaininfo()
         else:
             raise Exception('Not connected')
+
+    @control_rpc_call
+    def checkfeaturesupport(self, feature_name: str, smt_version: str, *args) -> Dict:
+        if self.open():
+            return self.proxy.checkfeaturesupport(feature_name, smt_version)
+        else:
+            raise Exception('Not connected')
+
+    def is_protx_update_pending(self, proregtx_hash:str) -> bool:
+        """
+        Check whether a protx transaction related to the proregtx passed as an argument exists in mempool.
+        :param protx_hash: Hash of the ProRegTx transaction
+        :return:
+        """
+
+        try:
+            cur_mempool_txes = self.getrawmempool()
+            if len(cur_mempool_txes) < 200:
+                for tx_hash in cur_mempool_txes:
+                    tx = self.mempool_txes.get(tx_hash)
+                    if not tx:
+                        tx = self.getrawtransaction(tx_hash, True, skip_cache=True)
+                        self.mempool_txes[tx_hash] = tx
+                    protx = tx.get('proUpRegTx')
+                    if not protx:
+                        protx = tx.get('proUpRevTx')
+                    if not protx:
+                        protx = tx.get('proUpServTx')
+                    if protx and protx.get('proTxHash') == proregtx_hash:
+                        return True
+            else:
+                log.warning('Mempool to large to scan for protx transaction. Skipping...')
+            return False
+        except Exception as e:
+            return False
 

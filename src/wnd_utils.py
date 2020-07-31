@@ -21,7 +21,8 @@ from PyQt5.QtCore import Qt, QObject, QLocale, QEventLoop, QTimer, QPoint, QEven
 from PyQt5.QtGui import QPalette, QPainter, QBrush, QColor, QPen, QIcon, QPixmap, QTextDocument, QCursor, \
     QAbstractTextDocumentLayout, QFontMetrics, QTransform, QKeySequence
 from PyQt5.QtWidgets import QMessageBox, QWidget, QFileDialog, QInputDialog, QItemDelegate, QLineEdit, \
-    QAbstractItemView, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView, QAction, QMenu, QApplication
+    QAbstractItemView, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView, QAction, QMenu, QApplication, \
+    QProxyStyle
 import math
 import message_dlg
 from thread_fun_dlg import ThreadFunDlg, WorkerThread, CtrlObject
@@ -206,7 +207,7 @@ class WndUtils:
         return thread_wnd_utils.call_in_main_thread_ext(fun_to_call, skip_if_main_thread_locked,
                                                         callback_if_main_thread_locked, *args, **kwargs)
 
-    def setIcon(self, widget, ico, rotate=0, force_color_change:str=None):
+    def getIcon(self, ico, rotate=0, force_color_change: str=None):
         if isinstance(ico, str):
             icon = QIcon()
             if app_defs.APP_IMAGE_DIR:
@@ -237,7 +238,10 @@ class WndUtils:
         else:
             icon = self.style().standardIcon(ico)
 
-        widget.setIcon(icon)
+        return icon
+
+    def setIcon(self, widget, ico, rotate=0, force_color_change: str=None):
+        widget.setIcon(self.getIcon(ico, rotate, force_color_change))
 
     @staticmethod
     def open_file_query(parent_wnd, app_config, message, directory='', filter='', initial_filter=''):
@@ -748,3 +752,16 @@ class HyperlinkItemDelegate(QStyledItemDelegate):
     def on_action_copy_text_triggered(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.last_text)
+
+
+class ProxyStyleNoFocusRect(QProxyStyle):
+    """
+    Dedicated to hide a dotted focus rectangle surrounding HTML elements (especially hypelinks) rendered inside
+    controls like QTextBrowser.
+    Usage: widget.setStyle(ProxyStyleNoFocusRect())
+    """
+    def styleHint(self, hint, option=None, widget=None, returnData=None):
+        if hint == QProxyStyle.SH_TextControl_FocusIndicatorTextCharFormat:
+            return False
+        return QProxyStyle.styleHint(self, hint, option, widget, returnData)
+

@@ -1,3 +1,94 @@
+## [0.9.26-hotfix2] - 2019-09-09
+
+**Fixed**
+- Fixed an issue with saving the ssh authentication method.
+
+## [0.9.26-hotfix1] - 2019-08-20
+
+**Fixed**
+- Proposals: remove votes from the cache that no longer exist on the network.
+
+## [0.9.26] - 2019-08-19
+**Added**
+- Commandline parameters for changing the sig_time random offset range.
+- Ability to explicitly specify the authentication methods for an SSH tunnel from: username/password, RSA private key 
+pair and ssh agent.
+- Workaround for Trezor connection issues (LIBUSB) after Windows update #1903.
+- Showing a message if duplicate masternode information in the configuration may prevent voting. 
+
+**Fixed**
+- Issue "'WalletDlg' object has no attribute 'config'" when signing message from the wallet dialog.
+
+## [0.9.25-hotfix2] - 2019-07-15
+
+**Fixed**
+- Issue "'WalletDlg' object has no attribute 'config'" when signing message from the wallet dialog.
+
+## [0.9.25-hotfix1] - 2019-07-12
+
+**Fixed**
+- Issue with calculating the next payment block when a masternode received PoSeBan in the past and its PoSeRevivedBlock 
+is less than the last payment block.
+
+## [0.9.25] - 2019-07-01
+**Added**
+- Support for the KeepKey v6.x firmware.
+- Possibility to limit the Trezor transport methods using commandline parameters.
+- Signing messages with owner/voting key.
+- Export/import of the configuration.
+
+**Fixed**
+- A bug related to access to uninitialized variable.
+
+## [0.9.24] - 2019-05-24
+
+**Added**
+- Support for the "update service" feature (mn IP/port, operator payout address).
+- Support for the "revoke operator" feature.
+- Additional encryption (RSA) of data sent over the Internet for protx RPC calls.
+
+**Changed**
+- Additional information in the status area, mainly concerning diagnosis of problems with masternode.
+
+
+## [0.9.23-hotfix3] - 2019-05-08
+
+**Fixed**
+- Malfunctioning/incorrect "details" link in the "Update payout address" dialog (the manual commands area).
+- Issue occurring during sending a transaction after switching hw identities (an empty message box).
+
+**Changed**
+- Extended information about transaction recipients in the transaction window.
+
+## [0.9.23-hotfix2] - 2019-05-03
+
+**Fixed**
+- Fix of the "invalid operator public key" error occurring in the
+"Update operator key" window when using the public key option (Kudos to 
+@Thiagokroger from Node40 for precise hints).
+
+## [0.9.23-hotfix1] - 2019-05-02
+
+**Fixed**
+- Issue with "Locate collateral" feature (an empty error message).
+- Switching the active RPC connection to another after encountering "Unknown error" and "401 Unauthorized" 
+errors.
+
+## [0.9.23] - 2019-04-27
+
+**Added**
+- The feature of restoring configuration from backup.
+- GUI for update_registrar (changing payout address, operator/voting key).
+- Extending the status area with additional information, including
+the estimated date of the next payment.
+
+**Changed**
+- Removed the pre-spork 15 code.
+- Fixes in the proposals dialog: support for v0.14-beta, issues with number of payment cycles. 
+- Clearing the pre-spork 15 voting results from the app cache to suggest 
+users the need to re-submit their votes.
+- Fixed some stability issues in the wallet dialog.
+
 ## [0.9.22] - 2019-02-24
 
 **Added**

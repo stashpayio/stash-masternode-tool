@@ -1,13 +1,13 @@
 {
-  "appCurrentVersion": "0.9.22-hotfix6",
+  "appCurrentVersion": "0.9.26-hotfix2",
   "exeDownloads": {
-    "mac": "https://github.com/stashpayio/stash-masternode-tool/releases/download/v0.9.22/StashMasternodeTool_0.9.22-hotfix6.mac.zip",
-    "win64": "https://github.com/stashpayio/stash-masternode-tool/releases/download/v0.9.22/StashMasternodeTool_0.9.22-hotfix6.win64.zip",
-    "linux": "https://github.com/stashpayio/stash-masternode-tool/releases/download/v0.9.22/StashMasternodeTool_0.9.22-hotfix6.linux.tar.gz"
+    "mac": "https://github.com/stashpayio/stash-masternode-tool/releases/download/v0.9.26/StashMasternodeTool_0.9.26-hotfix2.mac.zip",
+    "win64": "https://github.com/stashpayio/stash-masternode-tool/releases/download/v0.9.26/StashMasternodeTool_0.9.26-hotfix2.win64.zip",
+    "linux": "https://github.com/stashpayio/stash-masternode-tool/releases/download/v0.9.26/StashMasternodeTool_0.9.26-hotfix2.linux.tar.gz"
   },
   "defaultStashdProtocol": {
-    "mainnet": 70211,
-    "testnet": 70211
+    "mainnet": 70214,
+    "testnet": 70214
   },
   "sporks": [
     {
@@ -20,7 +20,7 @@
     {
       "name": "SPORK_15_DETERMINISTIC_MNS_ENABLED",
       "active": {
-        "mainnet": false,
+        "mainnet": true,
         "testnet": true
       }
     }
@@ -44,6 +44,54 @@
       "testnet": {
         "status": "enabled",
         "priority": 4
+      }
+    },
+    "REGISTER_DMN_AUTOMATIC": {
+      "mainnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
+      },
+      "testnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
+      }
+    },
+    "UPDATE_REGISTRAR_AUTOMATIC": {
+      "mainnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
+      },
+      "testnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
+      }
+    },
+    "UPDATE_SERVICE_AUTOMATIC": {
+      "mainnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
+      },
+      "testnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
+      }
+    },
+    "REVOKE_OPERATOR_AUTOMATIC": {
+      "mainnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
+      },
+      "testnet": {
+        "status": "enabled",
+        "priority": 4,
+        "message": ""
       }
     }
   }
